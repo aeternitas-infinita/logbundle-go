@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/aeternitas-infinita/logbundle-go/pkg/integrations/rmsentry"
+	"github.com/aeternitas-infinita/logbundle-go/pkg/integrations/lgsentry"
 )
 
 var Log = slog.New(NewCustomHandler(os.Stdout, slog.LevelError, false, false))
@@ -81,7 +81,7 @@ func (h *CustomHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 
 	if h.enableSentry == true {
-		rmsentry.CaptureEvent(ctx, r, slogAttrs)
+		lgsentry.CaptureEvent(ctx, r, slogAttrs)
 	}
 
 	return nil

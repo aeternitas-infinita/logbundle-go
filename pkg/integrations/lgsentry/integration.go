@@ -1,4 +1,4 @@
-package rmsentry
+package lgsentry
 
 import (
 	"context"

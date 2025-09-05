@@ -1,4 +1,4 @@
-package rmfiber
+package lgfiber
 
 import (
 	"errors"
