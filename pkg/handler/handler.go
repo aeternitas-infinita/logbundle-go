@@ -1,0 +1,96 @@
+package handler
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"runtime"
+	"strings"
+
+	"github.com/aeternitas-infinita/logbundle-go/pkg/integrations/rmsentry"
+)
+
+var Log = slog.New(NewCustomHandler(os.Stdout, slog.LevelError, false, false))
+
+type CustomHandler struct {
+	writer       io.Writer
+	addSource    bool
+	level        slog.Level
+	enableSentry bool
+}
+
+func NewCustomHandler(w io.Writer, level slog.Level, addSource, enableSentry bool) *CustomHandler {
+	return &CustomHandler{
+		writer:       w,
+		level:        level,
+		addSource:    addSource,
+		enableSentry: enableSentry,
+	}
+}
+
+func (h *CustomHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return level >= h.level
+}
+
+func (h *CustomHandler) Handle(ctx context.Context, r slog.Record) error {
+	timestamp := r.Time.Format("2006/01/02 15:04:05")
+
+	level := fmt.Sprintf("[%s]", strings.ToUpper(r.Level.String()))
+
+	var parts []string
+
+	if h.addSource == true {
+		var file string
+		var line int
+		if r.PC != 0 {
+			frame, _ := runtime.CallersFrames([]uintptr{r.PC}).Next()
+			file = frame.File
+			line = frame.Line
+		} else {
+			_, file, line, _ = runtime.Caller(3)
+		}
+		source := fmt.Sprintf("[%s:%d]", file, line)
+
+		parts = append(parts, timestamp, level, source, r.Message)
+	} else {
+		parts = append(parts, timestamp, level, r.Message)
+	}
+
+	var attrs []string
+	r.Attrs(func(a slog.Attr) bool {
+		attrs = append(attrs, fmt.Sprintf("%s=%s", a.Key, a.Value.String()))
+		return true
+	})
+
+	var slogAttrs []slog.Attr
+	r.Attrs(func(attr slog.Attr) bool {
+		slogAttrs = append(slogAttrs, attr)
+		return true
+	})
+
+	logLine := strings.Join(parts, " ")
+	if len(attrs) > 0 {
+		logLine += " " + strings.Join(attrs, " ")
+	}
+
+	_, err := fmt.Fprintln(h.writer, logLine)
+	if err != nil {
+		return err
+	}
+
+	if h.enableSentry == true {
+		rmsentry.CaptureEvent(ctx, r, slogAttrs)
+	}
+
+	return nil
+}
+
+func (h *CustomHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return h
+}
+
+func (h *CustomHandler) WithGroup(name string) slog.Handler {
+	return h
+}
