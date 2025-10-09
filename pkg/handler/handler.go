@@ -41,19 +41,25 @@ func (h *CustomHandler) Handle(ctx context.Context, r slog.Record) error {
 
 	var parts []string
 
-	if h.addSource == true {
+	if h.addSource {
 		var file string
 		var line int
+
+		// r.PC is set by slog when AddSource is enabled
+		// It points to the actual caller, not the library code
 		if r.PC != 0 {
-			frame, _ := runtime.CallersFrames([]uintptr{r.PC}).Next()
+			frames := runtime.CallersFrames([]uintptr{r.PC})
+			frame, _ := frames.Next()
 			file = frame.File
 			line = frame.Line
-		} else {
-			_, file, line, _ = runtime.Caller(3)
 		}
-		source := fmt.Sprintf("[%s:%d]", file, line)
 
-		parts = append(parts, timestamp, level, source, r.Message)
+		if file != "" {
+			source := fmt.Sprintf("[%s:%d]", file, line)
+			parts = append(parts, timestamp, level, source, r.Message)
+		} else {
+			parts = append(parts, timestamp, level, r.Message)
+		}
 	} else {
 		parts = append(parts, timestamp, level, r.Message)
 	}

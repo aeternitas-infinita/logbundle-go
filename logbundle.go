@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -41,8 +42,8 @@ type LoggerConfig struct {
 }
 
 func CreateLogger(config LoggerConfig) *slog.Logger {
-	handler := handler.NewCustomHandler(os.Stdout, config.Level, config.AddSource, config.SentryEnabled)
-	return slog.New(handler)
+	h := handler.NewCustomHandler(os.Stdout, config.Level, config.AddSource, config.SentryEnabled)
+	return slog.New(h)
 }
 
 func TraceIDToFHCtx(ctx *fasthttp.RequestCtx) {
@@ -74,66 +75,90 @@ func GetBoolFromStr(s string) bool {
 
 }
 
+// logWithSource logs with proper source location (skip = 3 to bypass this func and the wrapper)
+func logWithSource(logger *slog.Logger, level slog.Level, msg string, args ...any) {
+	if !logger.Enabled(context.Background(), level) {
+		return
+	}
+	var pcs [1]uintptr
+	runtime.Callers(3, pcs[:]) // skip: Callers, logWithSource, wrapper func (Info/Debug/etc)
+	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+	r.Add(args...)
+	_ = logger.Handler().Handle(context.Background(), r)
+}
+
+// logWithSourceCtx logs with context and proper source location
+func logWithSourceCtx(ctx context.Context, logger *slog.Logger, level slog.Level, msg string, args ...any) {
+	if !logger.Enabled(ctx, level) {
+		return
+	}
+	var pcs [1]uintptr
+	runtime.Callers(3, pcs[:]) // skip: Callers, logWithSourceCtx, wrapper func (InfoCtx/etc)
+	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+	r.Add(args...)
+	_ = logger.Handler().Handle(ctx, r)
+}
+
 func Info(msg string, args ...any) {
-	Log.Info(msg, args...)
+	logWithSource(Log, slog.LevelInfo, msg, args...)
 }
 
 func Debug(msg string, args ...any) {
-	Log.Debug(msg, args...)
+	logWithSource(Log, slog.LevelDebug, msg, args...)
 }
 
 func Warn(msg string, args ...any) {
-	Log.Warn(msg, args...)
+	logWithSource(Log, slog.LevelWarn, msg, args...)
 }
 
 func Error(msg string, args ...any) {
-	Log.Error(msg, args...)
+	logWithSource(Log, slog.LevelError, msg, args...)
 }
 
 func DebugCtx(ctx context.Context, msg string, args ...any) {
-	Log.DebugContext(ctx, msg, args...)
+	logWithSourceCtx(ctx, Log, slog.LevelDebug, msg, args...)
 }
 
 func InfoCtx(ctx context.Context, msg string, args ...any) {
-	Log.InfoContext(ctx, msg, args...)
+	logWithSourceCtx(ctx, Log, slog.LevelInfo, msg, args...)
 }
 
 func WarnCtx(ctx context.Context, msg string, args ...any) {
-	Log.WarnContext(ctx, msg, args...)
+	logWithSourceCtx(ctx, Log, slog.LevelWarn, msg, args...)
 }
 
 func ErrorCtx(ctx context.Context, msg string, args ...any) {
-	Log.ErrorContext(ctx, msg, args...)
+	logWithSourceCtx(ctx, Log, slog.LevelError, msg, args...)
 }
 
 func DebugMin(msg string, args ...any) {
-	LogMin.Debug(msg, args...)
+	logWithSource(LogMin, slog.LevelDebug, msg, args...)
 }
 
 func InfoMin(msg string, args ...any) {
-	LogMin.Info(msg, args...)
+	logWithSource(LogMin, slog.LevelInfo, msg, args...)
 }
 
 func WarnMin(msg string, args ...any) {
-	LogMin.Warn(msg, args...)
+	logWithSource(LogMin, slog.LevelWarn, msg, args...)
 }
 
 func ErrorMin(msg string, args ...any) {
-	LogMin.Error(msg, args...)
+	logWithSource(LogMin, slog.LevelError, msg, args...)
 }
 
 func DebugCtxMin(ctx context.Context, msg string, args ...any) {
-	LogMin.DebugContext(ctx, msg, args...)
+	logWithSourceCtx(ctx, LogMin, slog.LevelDebug, msg, args...)
 }
 
 func InfoCtxMin(ctx context.Context, msg string, args ...any) {
-	LogMin.InfoContext(ctx, msg, args...)
+	logWithSourceCtx(ctx, LogMin, slog.LevelInfo, msg, args...)
 }
 
 func WarnCtxMin(ctx context.Context, msg string, args ...any) {
-	LogMin.WarnContext(ctx, msg, args...)
+	logWithSourceCtx(ctx, LogMin, slog.LevelWarn, msg, args...)
 }
 
 func ErrorCtxMin(ctx context.Context, msg string, args ...any) {
-	LogMin.ErrorContext(ctx, msg, args...)
+	logWithSourceCtx(ctx, LogMin, slog.LevelError, msg, args...)
 }

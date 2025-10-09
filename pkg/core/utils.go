@@ -52,31 +52,41 @@ func GetTraceID(ctx any) string {
 func ExtractErrorLocation(stackTrace string) string {
 	lines := strings.Split(stackTrace, "\n")
 
+	// Skip goroutine line and runtime panic lines
+	// Looking for the first non-runtime, non-library line
 	for i := 0; i < len(lines)-1; i++ {
-		if strings.Contains(lines[i], "im-in-fairy-tale-main") &&
-			!strings.Contains(lines[i], "FiberRecoverMiddleware") {
+		line := strings.TrimSpace(lines[i])
 
-			nextLine := ""
-			if i+1 < len(lines) {
-				nextLine = lines[i+1]
-			}
+		// Skip empty lines
+		if line == "" {
+			continue
+		}
 
+		// Skip goroutine info
+		if strings.HasPrefix(line, "goroutine ") {
+			continue
+		}
+
+		// Look at the next line which should contain file:line
+		if i+1 < len(lines) {
+			nextLine := strings.TrimSpace(lines[i+1])
+
+			// Check if this line contains .go: (file path with line number)
 			if strings.Contains(nextLine, ".go:") {
-				filePath := strings.TrimSpace(nextLine)
+				// Skip runtime and library internals
+				if strings.Contains(nextLine, "runtime/") ||
+					strings.Contains(nextLine, "logbundle-go/") ||
+					strings.Contains(line, "FiberRecoverMiddleware") ||
+					strings.Contains(line, "RecoverWithContext") {
+					continue
+				}
 
-				if idx := strings.LastIndex(filePath, "im-in-fairy-tale-main-backend"); idx != -1 {
-					filePath = filePath[idx:]
-
-					parts := strings.Split(filePath, " ")
-					if len(parts) > 0 {
-						cleanPath := parts[0]
-						const prefix = "im-in-fairy-tale-main-backend/"
-						cleanPath = strings.TrimPrefix(cleanPath, prefix)
-						return cleanPath
-					}
+				// Extract file path
+				parts := strings.Fields(nextLine)
+				if len(parts) > 0 {
+					filePath := parts[0]
 					return filePath
 				}
-				return filePath
 			}
 		}
 	}
