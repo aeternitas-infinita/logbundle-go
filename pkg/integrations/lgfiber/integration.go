@@ -67,7 +67,7 @@ func RecoverMiddleware(c *fiber.Ctx) error {
 			}
 
 			stackTrace := string(debug.Stack())
-			errorLoc := core.ExtractErrorLocation(stackTrace)
+			errorLoc, file, line := core.ExtractErrorLocationWithDetails(stackTrace)
 
 			logFields := []any{
 				slog.String("url", c.OriginalURL()),
@@ -77,6 +77,15 @@ func RecoverMiddleware(c *fiber.Ctx) error {
 
 			if eventID != nil {
 				logFields = append(logFields, slog.String("sentry_event_id", string(*eventID)))
+			}
+
+			// Add source information if available
+			if file != "" && line > 0 {
+				logFields = append(logFields, slog.Any("source", slog.Source{
+					Function: "",
+					File:     file,
+					Line:     line,
+				}))
 			}
 
 			handler.Log.ErrorContext(c.Context(), "Panic recovered", logFields...)

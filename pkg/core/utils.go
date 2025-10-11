@@ -50,6 +50,11 @@ func GetTraceID(ctx any) string {
 }
 
 func ExtractErrorLocation(stackTrace string) string {
+	location, _, _ := ExtractErrorLocationWithDetails(stackTrace)
+	return location
+}
+
+func ExtractErrorLocationWithDetails(stackTrace string) (string, string, int) {
 	lines := strings.Split(stackTrace, "\n")
 
 	// Skip goroutine line and runtime panic lines
@@ -85,13 +90,23 @@ func ExtractErrorLocation(stackTrace string) string {
 				parts := strings.Fields(nextLine)
 				if len(parts) > 0 {
 					filePath := parts[0]
-					return filePath
+
+					// Parse file and line number
+					fileLineParts := strings.Split(filePath, ":")
+					if len(fileLineParts) >= 2 {
+						file := fileLineParts[0]
+						lineNum := 0
+						fmt.Sscanf(fileLineParts[1], "%d", &lineNum)
+						return filePath, file, lineNum
+					}
+
+					return filePath, filePath, 0
 				}
 			}
 		}
 	}
 
-	return "unknown location"
+	return "unknown location", "", 0
 }
 
 func GetLvlFromEnv(key string) slog.Level {

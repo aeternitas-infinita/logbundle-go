@@ -45,9 +45,24 @@ func (h *CustomHandler) Handle(ctx context.Context, r slog.Record) error {
 		var file string
 		var line int
 
-		// r.PC is set by slog when AddSource is enabled
-		// It points to the actual caller, not the library code
-		if r.PC != 0 {
+		// First check if there's a manually set source in the attributes
+		var manualSource *slog.Source
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "source" {
+				if src, ok := a.Value.Any().(slog.Source); ok {
+					manualSource = &src
+					return false // stop iteration
+				}
+			}
+			return true
+		})
+
+		if manualSource != nil {
+			file = manualSource.File
+			line = manualSource.Line
+		} else if r.PC != 0 {
+			// r.PC is set by slog when AddSource is enabled
+			// It points to the actual caller, not the library code
 			frames := runtime.CallersFrames([]uintptr{r.PC})
 			frame, _ := frames.Next()
 			file = frame.File
@@ -66,6 +81,10 @@ func (h *CustomHandler) Handle(ctx context.Context, r slog.Record) error {
 
 	var attrs []string
 	r.Attrs(func(a slog.Attr) bool {
+		// Skip the manual source attribute as it's already handled
+		if a.Key == "source" {
+			return true
+		}
 		attrs = append(attrs, fmt.Sprintf("%s=%s", a.Key, a.Value.String()))
 		return true
 	})
