@@ -46,16 +46,16 @@ func CreateLogger(config LoggerConfig) *slog.Logger {
 	return slog.New(h)
 }
 
-func TraceIDToFHCtx(ctx *fasthttp.RequestCtx) {
-	core.TraceIDToFHCtx(ctx)
+func LogTraceIDToFHCtx(ctx *fasthttp.RequestCtx) {
+	core.LogTraceIDToFHCtx(ctx)
 }
 
-func CtxWithTraceID(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
-	return core.CtxWithTraceID(parent, timeout)
+func CtxWithLogTraceID(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return core.CtxWithLogTraceID(parent, timeout)
 }
 
-func GetTraceID(ctx any) string {
-	return core.GetTraceID(ctx)
+func GetLogTraceID(ctx any) string {
+	return core.GetLogTraceID(ctx)
 }
 
 func ErrAttr(err error) slog.Attr {
@@ -66,7 +66,7 @@ func GetLvlFromStr(s string) slog.Level {
 	return core.GetLvlFromStr(s)
 }
 
-func UpdateTraceIDKey(s string) {
+func UpdateLogTraceIDKey(s string) {
 	core.TraceIDKey = s
 }
 

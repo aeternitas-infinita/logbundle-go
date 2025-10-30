@@ -4,7 +4,7 @@ import (
 	"log/slog"
 )
 
-var TraceIDKey = "trace_id"
+var TraceIDKey = "log_trace_id"
 
 type LoggerConfig struct {
 	AddSource    bool

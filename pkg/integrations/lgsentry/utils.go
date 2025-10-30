@@ -1,3 +1,5 @@
+// rev.
+
 package lgsentry
 
 import (
@@ -30,9 +32,9 @@ func extractSourceInfo(r slog.Record) *SourceInfo {
 	}
 }
 
-func extractSentryData(attrs []slog.Attr) (map[string]string, map[string]interface{}, error) {
+func extractSentryData(attrs []slog.Attr) (map[string]string, map[string]any, error) {
 	tags := make(map[string]string)
-	extra := make(map[string]interface{})
+	extra := make(map[string]any)
 	var errorValue error
 
 	for _, atr := range attrs {

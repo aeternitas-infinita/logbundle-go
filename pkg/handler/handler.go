@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/aeternitas-infinita/logbundle-go/pkg/core"
 	"github.com/aeternitas-infinita/logbundle-go/pkg/integrations/lgsentry"
 )
 
@@ -40,6 +41,15 @@ func (h *CustomHandler) Handle(ctx context.Context, r slog.Record) error {
 	level := fmt.Sprintf("[%s]", strings.ToUpper(r.Level.String()))
 
 	var parts []string
+
+	// Extract trace_id from context if available
+	var traceIDAttr *slog.Attr
+	if ctx != nil {
+		if traceID := core.GetLogTraceID(ctx); traceID != "" {
+			attr := slog.String(core.TraceIDKey, traceID)
+			traceIDAttr = &attr
+		}
+	}
 
 	if h.addSource {
 		var file string
@@ -80,6 +90,12 @@ func (h *CustomHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 
 	var attrs []string
+
+	// Add trace_id first if available
+	if traceIDAttr != nil {
+		attrs = append(attrs, fmt.Sprintf("%s=%s", traceIDAttr.Key, traceIDAttr.Value.String()))
+	}
+
 	r.Attrs(func(a slog.Attr) bool {
 		// Skip the manual source attribute as it's already handled
 		if a.Key == "source" {
@@ -106,7 +122,7 @@ func (h *CustomHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 
 	if h.enableSentry == true {
-		lgsentry.CaptureEvent(ctx, r, slogAttrs)
+		lgsentry.CaptureEventForSlog(ctx, r, slogAttrs)
 	}
 
 	return nil

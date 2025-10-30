@@ -17,16 +17,16 @@ func ErrAttr(err error) slog.Attr {
 	return slog.Any("error", err)
 }
 
-func TraceIDToFHCtx(ctx *fasthttp.RequestCtx) {
+func LogTraceIDToFHCtx(ctx *fasthttp.RequestCtx) {
 	ctx.SetUserValue(TraceIDKey, uuid.New().String())
 }
 
-func CtxWithTraceID(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+func CtxWithLogTraceID(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	return context.WithValue(ctx, TraceIDKey, uuid.New().String()), cancel
 }
 
-func GetTraceID(ctx any) string {
+func GetLogTraceID(ctx any) string {
 	if ctx == nil {
 		return ""
 	}
@@ -78,11 +78,20 @@ func ExtractErrorLocationWithDetails(stackTrace string) (string, string, int) {
 
 			// Check if this line contains .go: (file path with line number)
 			if strings.Contains(nextLine, ".go:") {
+				// Normalize path for checking (handle both Windows and Unix paths)
+				normalizedPath := strings.ReplaceAll(nextLine, "\\", "/")
+
 				// Skip runtime and library internals
-				if strings.Contains(nextLine, "runtime/") ||
-					strings.Contains(nextLine, "logbundle-go/") ||
+				if strings.Contains(normalizedPath, "runtime/") ||
+					strings.Contains(normalizedPath, "/runtime.") ||
+					strings.Contains(normalizedPath, "logbundle-go/") ||
+					strings.Contains(normalizedPath, "/logbundle-go/") ||
+					strings.Contains(normalizedPath, "\\logbundle-go\\") ||
 					strings.Contains(line, "FiberRecoverMiddleware") ||
-					strings.Contains(line, "RecoverWithContext") {
+					strings.Contains(line, "RecoverMiddleware") ||
+					strings.Contains(line, "RecoverWithContext") ||
+					strings.Contains(line, "panic") ||
+					strings.Contains(line, "(*Ctx).Next") {
 					continue
 				}
 
