@@ -3,7 +3,6 @@ package erri
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -13,83 +12,14 @@ import (
 	"github.com/aeternitas-infinita/logbundle-go/pkg/handler"
 )
 
-type ErriType string
-
-type requestInfo struct {
-	URL         string         `json:"url"`
-	Method      string         `json:"method"`
-	Params      map[string]any `json:"params,omitempty"`
-	QueryParams map[string]any `json:"query_params,omitempty"`
-	Route       string         `json:"route"`
-}
-
-var ErriStruct = struct {
-	NOT_FOUND   ErriType
-	VALIDATION  ErriType
-	DATABASE    ErriType
-	INTERNAL    ErriType
-	BUSY        ErriType
-	FORBIDDEN   ErriType
-	WRONG_INPUT ErriType
-}{
-	NOT_FOUND:   "NOT_FOUND",
-	VALIDATION:  "VALIDATION",
-	DATABASE:    "DATABASE",
-	INTERNAL:    "INTERNAL",
-	BUSY:        "BUSY",
-	FORBIDDEN:   "FORBIDDEN",
-	WRONG_INPUT: "WRONG_INPUT",
-}
-
-type Erri struct {
-	Type        ErriType
-	Property    string
-	Value       any
-	Message     string
-	Details     string
-	File        string
-	SystemError error
-}
-
-func (e *Erri) Error() string {
-	return fmt.Sprintf("handled internal error. Details: '%s', file: '%s', type: '%s' system error: '%v'", e.Details, e.File, e.Type, e.SystemError)
-}
-
-func (e *Erri) HTTPStatusCode() int {
-	switch e.Type {
-	case ErriStruct.NOT_FOUND:
-		return http.StatusNotFound
-	case ErriStruct.VALIDATION:
-		return http.StatusBadRequest
-	case ErriStruct.DATABASE:
-		return http.StatusInternalServerError
-	case ErriStruct.INTERNAL:
-		return http.StatusInternalServerError
-	case ErriStruct.FORBIDDEN:
-		return http.StatusForbidden
-	case ErriStruct.BUSY:
-		return http.StatusConflict
-	case ErriStruct.WRONG_INPUT:
-		return http.StatusBadRequest
-
-	default:
-		return http.StatusInternalServerError
-	}
-}
-
-func New() *ErriBuilder {
-	return &ErriBuilder{
-		err: &Erri{
-			File: core.GetLinePositionStringWithSkip(2),
-		},
-	}
-}
-
+// Handle processes an error and returns appropriate HTTP status and response
+// It logs internal errors and database errors, and formats user-facing responses
 func Handle(ctx context.Context, err error, c *fiber.Ctx) (int, *HttpResponse) {
 	var internalErr *Erri
 	if errors.As(err, &internalErr) {
 		statusCode := internalErr.HTTPStatusCode()
 
+		// Log severe errors (5xx and database errors)
 		if statusCode == http.StatusInternalServerError ||
 			internalErr.Type == ErriStruct.DATABASE {
 			requestInfo := extractRequestInfo(c)
@@ -112,6 +42,7 @@ func Handle(ctx context.Context, err error, c *fiber.Ctx) (int, *HttpResponse) {
 			)
 		}
 
+		// Return structured response if property and message are set
 		if internalErr.Property == "" || internalErr.Message == "" {
 			return statusCode, &HttpResponse{
 				Message: "Oops, something went wrong",
@@ -122,6 +53,7 @@ func Handle(ctx context.Context, err error, c *fiber.Ctx) (int, *HttpResponse) {
 		}
 	}
 
+	// Handle non-Erri errors
 	if c != nil {
 		requestInfo := extractRequestInfo(c)
 		handler.Log.ErrorContext(ctx, "handled error",
@@ -139,23 +71,7 @@ func Handle(ctx context.Context, err error, c *fiber.Ctx) (int, *HttpResponse) {
 	return http.StatusInternalServerError, nil
 }
 
-type AnswerInfoType struct {
-	Property string `json:"property,omitempty"`
-	CodeType int    `json:"code_type,omitempty"`
-	Message  string `json:"message,omitempty"`
-}
-
-type HttpResponse struct {
-	Data       any              `json:"data,omitempty"`
-	AnswerCode int              `json:"answer_code,omitempty"`
-	AnswerInfo []AnswerInfoType `json:"answer_info,omitempty"`
-	Message    string           `json:"message,omitempty"`
-}
-
-func (mr *HttpResponse) Error() string {
-	return fmt.Sprintf("Message: %s", mr.Message)
-}
-
+// LogErri logs an Erri error with full context using a custom logger
 func LogErri(ctx context.Context, internalErr *Erri, logger *slog.Logger, c *fiber.Ctx) {
 	var requestInfo requestInfo
 	if c != nil {
@@ -178,4 +94,27 @@ func LogErri(ctx context.Context, internalErr *Erri, logger *slog.Logger, c *fib
 		slog.Any("request_params", requestInfo.Params),
 		slog.Any("request_query_params", requestInfo.QueryParams),
 	)
+}
+
+// extractRequestInfo extracts HTTP request information from Fiber context
+func extractRequestInfo(c *fiber.Ctx) requestInfo {
+	var params map[string]any
+	if paramsValue := c.Locals("params"); paramsValue != nil {
+		params = map[string]any{
+			"params": paramsValue,
+		}
+	}
+
+	queryParams := make(map[string]any)
+	for key, value := range c.Context().QueryArgs().All() {
+		queryParams[string(key)] = string(value)
+	}
+
+	return requestInfo{
+		URL:         c.OriginalURL(),
+		Method:      c.Method(),
+		Params:      params,
+		QueryParams: queryParams,
+		Route:       c.Route().Path,
+	}
 }

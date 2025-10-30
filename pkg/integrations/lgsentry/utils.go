@@ -1,5 +1,3 @@
-// rev.
-
 package lgsentry
 
 import (
@@ -9,11 +7,18 @@ import (
 	"strings"
 )
 
+const (
+	// Maximum string length before treating as "extra" data instead of a tag
+	maxTagLength = 100
+)
+
+// SourceInfo contains file and line information from a log record
 type SourceInfo struct {
 	File string
 	Line int
 }
 
+// extractSourceInfo retrieves source file and line number from a slog record
 func extractSourceInfo(r slog.Record) *SourceInfo {
 	if r.PC == 0 {
 		return nil
@@ -32,6 +37,8 @@ func extractSourceInfo(r slog.Record) *SourceInfo {
 	}
 }
 
+// extractSentryData separates slog attributes into Sentry tags (indexed strings),
+// extra data (complex objects), and extracts the first error value
 func extractSentryData(attrs []slog.Attr) (map[string]string, map[string]any, error) {
 	tags := make(map[string]string)
 	extra := make(map[string]any)
@@ -41,23 +48,30 @@ func extractSentryData(attrs []slog.Attr) (map[string]string, map[string]any, er
 		key := atr.Key
 		value := atr.Value.Any()
 
+		// Extract first error encountered
 		if err, ok := value.(error); ok && errorValue == nil {
 			errorValue = err
 			continue
 		}
 
-		if strVal, ok := value.(string); ok && len(strVal) < 100 && !strings.Contains(strVal, "\n") {
+		// Short strings become tags (searchable in Sentry)
+		if strVal, ok := value.(string); ok && len(strVal) < maxTagLength && !strings.Contains(strVal, "\n") {
 			tags[key] = strVal
-		} else if numVal, ok := value.(int); ok {
-			tags[key] = fmt.Sprintf("%d", numVal)
-		} else if numVal, ok := value.(int64); ok {
-			tags[key] = fmt.Sprintf("%d", numVal)
-		} else if boolVal, ok := value.(bool); ok {
-			tags[key] = fmt.Sprintf("%t", boolVal)
-		} else {
-			extra[key] = value
+			continue
 		}
 
+		// Numeric values become tags
+		switch numVal := value.(type) {
+		case int:
+			tags[key] = fmt.Sprintf("%d", numVal)
+		case int64:
+			tags[key] = fmt.Sprintf("%d", numVal)
+		case bool:
+			tags[key] = fmt.Sprintf("%t", numVal)
+		default:
+			// Everything else becomes extra data
+			extra[key] = value
+		}
 	}
 
 	return tags, extra, errorValue

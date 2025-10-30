@@ -16,6 +16,7 @@
 ## Table of Contents
 
 - [Installation](#installation)
+- [Project Structure](#project-structure)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Logging](#logging)
@@ -30,6 +31,86 @@
 ```bash
 go get github.com/aeternitas-infinita/logbundle-go
 ```
+
+## Project Structure
+
+LogBundle-Go follows Go's best practices for package organization:
+
+### Public API (`pkg/`)
+Users can import utilities from `pkg/` for direct use in their applications:
+
+```
+pkg/
+├── core/              # Core utilities (trace IDs, log levels, error helpers)
+│   ├── core.go       # Package documentation and TraceIDKey constant
+│   ├── trace.go      # GetLogTraceID, CtxWithLogTraceID, LogTraceIDToFHCtx
+│   ├── levels.go     # GetLvlFromEnv, GetLvlFromStr, GetBoolFromStr
+│   └── errors.go     # ErrAttr, error location extraction
+│
+└── integrations/
+    ├── erri/         # Custom error types for better Sentry categorization
+    │   ├── erri.go           # Factory function (New)
+    │   ├── types.go          # Error type definitions
+    │   ├── builder.go        # Builder pattern implementation
+    │   └── handlers.go       # Handle, LogErri functions
+    │
+    ├── lgfiber/      # Fiber middleware and utilities
+    │   ├── lgfiber.go        # All 16 exported functions (public API)
+    │   ├── internal.go       # captureErrorToSentry helper
+    │   └── classify.go       # Error classification logic
+    │
+    └── lgsentry/     # Sentry integration for slog
+        ├── lgsentry.go       # Init, Flush functions
+        ├── config.go         # Config type
+        ├── capture.go        # CaptureEventForSlog
+        ├── convert.go        # Internal log level conversion
+        └── utils.go          # Internal data extraction
+```
+
+### Private Implementation (`internal/`)
+Hidden from external imports using Go's `internal/` package convention:
+
+```
+internal/
+├── handler/
+│   └── handler.go       # CustomHandler (slog.Handler implementation)
+│                        # - Not meant for direct user use
+│                        # - Only imported by config.go
+│
+└── logger/
+    └── helpers.go       # LogWithSource, LogWithSourceCtx
+                         # - Private logging helpers
+                         # - Manage source location tracking
+```
+
+### Root Package API (`logbundle.go`, `config.go`, `api.go`, etc.)
+The main entry point for users:
+
+```
+├── logbundle.go         # Package documentation and feature overview
+├── config.go            # LoggerConfig, InitLog, InitLogMin, CreateLogger
+├── api.go               # Basic logging: Info, Debug, Warn, Error
+├── api_context.go       # Context-aware logging: InfoCtx, DebugCtx, etc.
+├── api_min.go           # Minimal logger API (high-performance)
+└── api_utils.go         # Utilities: ErrAttr, GetLogTraceID, etc.
+```
+
+### Why This Structure?
+
+**Public (`pkg/`):**
+- Utilities that users may need to import directly
+- Well-defined, stable interfaces
+- Example: `core.GetLogTraceID()`, `erri.New()`, `lgfiber.AddBreadcrumb()`
+
+**Private (`internal/`):**
+- Implementation details that users should NOT import
+- Enforced by Go compiler (import errors if attempted from external packages)
+- Example: `internal/handler/CustomHandler` - only used internally by the logger
+
+**Root Package:**
+- Primary user-facing API
+- Simple imports: `import "github.com/aeternitas-infinita/logbundle-go"`
+- Most common use case
 
 ## Quick Start
 
@@ -645,6 +726,34 @@ logbundle.Info("User authenticated",
     slog.String("user_id", userID),
     slog.Bool("card_verified", true))
 ```
+
+### 11. Understand Package Organization
+
+LogBundle-Go has a clear package structure. Import from `pkg/` for reusable utilities, never from `internal/`:
+
+```go
+// ✅ Good - importing public utilities
+import (
+    "github.com/aeternitas-infinita/logbundle-go"
+    "github.com/aeternitas-infinita/logbundle-go/pkg/core"
+    "github.com/aeternitas-infinita/logbundle-go/pkg/integrations/lgfiber"
+    "github.com/aeternitas-infinita/logbundle-go/pkg/integrations/erri"
+)
+
+// ❌ Bad - internal package not accessible from outside
+// This will cause a compile error:
+import "github.com/aeternitas-infinita/logbundle-go/internal/handler" // ERROR!
+```
+
+**Package Types:**
+- **Root package** (`logbundle`): Main entry point - most common import
+- **`pkg/core`**: Trace IDs, log levels, error helpers
+- **`pkg/integrations/lgfiber`**: Fiber middleware and utilities
+- **`pkg/integrations/lgsentry`**: Sentry configuration
+- **`pkg/integrations/erri`**: Custom error types
+- **`internal/`**: Private implementation (Go compiler prevents external imports)
+
+See [Project Structure](#project-structure) for detailed overview.
 
 ## API Reference
 

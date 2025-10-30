@@ -1,59 +1,26 @@
 package core
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"runtime"
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
-	"github.com/valyala/fasthttp"
 )
 
+// ErrAttr creates a slog.Attr for an error with key "error"
 func ErrAttr(err error) slog.Attr {
 	return slog.Any("error", err)
 }
 
-func LogTraceIDToFHCtx(ctx *fasthttp.RequestCtx) {
-	ctx.SetUserValue(TraceIDKey, uuid.New().String())
+// GetLinePositionStringWithSkip returns formatted file:line position string
+// skip indicates how many stack frames to skip (caller depth)
+func GetLinePositionStringWithSkip(skip int) string {
+	_, file, line, _ := runtime.Caller(skip)
+	return fmt.Sprintf("[%s:%d]", file, line)
 }
 
-func CtxWithLogTraceID(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	return context.WithValue(ctx, TraceIDKey, uuid.New().String()), cancel
-}
-
-func GetLogTraceID(ctx any) string {
-	if ctx == nil {
-		return ""
-	}
-
-	if requestCtx, ok := ctx.(*fasthttp.RequestCtx); ok {
-		if v := requestCtx.UserValue(TraceIDKey); v != nil {
-			return v.(string)
-		}
-		return ""
-	}
-
-	if stdCtx, ok := ctx.(context.Context); ok {
-		if v := stdCtx.Value(TraceIDKey); v != nil {
-			if traceID, ok := v.(string); ok {
-				return traceID
-			}
-		}
-	}
-
-	return ""
-}
-
-func ExtractErrorLocation(stackTrace string) string {
-	location, _, _ := ExtractErrorLocationWithDetails(stackTrace)
-	return location
-}
-
+// ExtractErrorLocationWithDetails parses a stack trace and returns the first non-library error location
+// Returns: (fullLocation, file, lineNumber)
 func ExtractErrorLocationWithDetails(stackTrace string) (string, string, int) {
 	lines := strings.Split(stackTrace, "\n")
 
@@ -116,37 +83,4 @@ func ExtractErrorLocationWithDetails(stackTrace string) (string, string, int) {
 	}
 
 	return "unknown location", "", 0
-}
-
-func GetLvlFromEnv(key string) slog.Level {
-	if value := os.Getenv(key); value != "" {
-		return GetLvlFromStr(value)
-	}
-	return slog.LevelWarn
-}
-
-func GetLvlFromStr(s string) slog.Level {
-	var level slog.Level
-
-	switch s {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	default:
-		level = slog.LevelWarn
-	}
-
-	return level
-}
-
-func GetLinePositionStringWithSkip(skip int) string {
-	_, file, line, _ := runtime.Caller(skip)
-	return fmt.Sprintf("[%s:%d]", file, line)
-}
-
-func GetBoolFromStr(s string) bool {
-	return strings.ToLower(s) == "true"
 }
