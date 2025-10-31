@@ -34,6 +34,74 @@ func Init(config *Config) error {
 			event.Tags = make(map[string]string)
 		}
 
+		// Improve error message for better Sentry issue titles
+		if len(event.Exception) > 0 {
+			exception := event.Exception[0]
+
+			// List of generic Go error types that need better messages
+			genericErrorTypes := []string{
+				"*fmt.wrapError",
+				"*errors.errorString",
+				"*errors.joinError",
+				"*url.Error",
+				"errors.errorString",
+				"fmt.wrapError",
+			}
+
+			// Check if this is a generic error type
+			isGenericType := false
+			for _, genericType := range genericErrorTypes {
+				if exception.Type == genericType {
+					isGenericType = true
+					break
+				}
+			}
+
+			// Extract a better message
+			var betterMessage string
+
+			// Priority 1: Use Message from internal_error context (for erri.Erri)
+			if event.Contexts != nil {
+				if internalErr, ok := event.Contexts["internal_error"]; ok {
+					if msg, ok := internalErr["message"].(string); ok && msg != "" {
+						betterMessage = msg
+					} else if details, ok := internalErr["details"].(string); ok && details != "" {
+						betterMessage = details
+					}
+				}
+
+				// Priority 2: Use message from error_details context
+				if betterMessage == "" {
+					if errorDetails, ok := event.Contexts["error_details"]; ok {
+						if msg, ok := errorDetails["message"].(string); ok && msg != "" {
+							betterMessage = msg
+						}
+					}
+				}
+			}
+
+			// Priority 3: Use exception value if available
+			if betterMessage == "" && exception.Value != "" {
+				betterMessage = exception.Value
+			}
+
+			// Apply the better message if found
+			if betterMessage != "" {
+				// Truncate long messages for readability (max 200 chars)
+				if len(betterMessage) > 200 {
+					betterMessage = betterMessage[:197] + "..."
+				}
+
+				// Update the exception value (this becomes the Sentry issue title)
+				event.Exception[0].Value = betterMessage
+
+				// Also update the event message for consistency
+				if event.Message == "" || isGenericType {
+					event.Message = betterMessage
+				}
+			}
+		}
+
 		// Enhance event with Fiber request data if available
 		if hint != nil && hint.Context != nil {
 			if fc, ok := hint.Context.Value("fiber_ctx").(*fiber.Ctx); ok && fc != nil {
