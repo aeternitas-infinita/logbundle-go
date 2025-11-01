@@ -7,7 +7,13 @@ import (
 )
 
 // shouldCaptureLevel checks if the given log level should be sent to Sentry
+// If filterLevels is empty/nil, all logs are captured
+// If filterLevels is set, only logs at those levels or higher are captured
 func shouldCaptureLevel(level slog.Level, filterLevels []slog.Level) bool {
+	if len(filterLevels) == 0 {
+		return true
+	}
+
 	for _, filterLevel := range filterLevels {
 		if level >= filterLevel {
 			return true

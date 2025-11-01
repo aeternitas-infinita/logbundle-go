@@ -34,6 +34,18 @@ func CaptureEventForSlog(ctx context.Context, r slog.Record, args []slog.Attr) {
 	// Extract and organize log data
 	tags, extra, errorValue := extractSentryData(args)
 
+	// Check if this is an Erri error and add structured tags
+	if errType, hasType := extra["type"]; hasType {
+		if typeStr, ok := errType.(string); ok && typeStr != "" {
+			tags["error_type"] = typeStr
+		}
+	}
+	if property, hasProp := extra["property"]; hasProp {
+		if propStr, ok := property.(string); ok && propStr != "" {
+			tags["error_property"] = propStr
+		}
+	}
+
 	// Add trace ID for log correlation
 	if traceID := core.GetLogTraceID(ctx); traceID != "" {
 		tags[core.TraceIDKey] = traceID
@@ -84,6 +96,26 @@ func CaptureEventForSlog(ctx context.Context, r slog.Record, args []slog.Attr) {
 			"source":    tags["source"],
 		})
 
+		// Add internal_error context for Erri errors (used by BeforeSend to improve issue titles)
+		if details, hasDetails := extra["details"]; hasDetails {
+			internalErrCtx := map[string]any{}
+			if details != nil {
+				internalErrCtx["details"] = details
+			}
+			if msg, hasMsg := extra["message"]; hasMsg && msg != nil {
+				internalErrCtx["message"] = msg
+			}
+			if errType, hasType := extra["type"]; hasType && errType != nil {
+				internalErrCtx["type"] = errType
+			}
+			if property, hasProp := extra["property"]; hasProp && property != nil {
+				internalErrCtx["property"] = property
+			}
+			if len(internalErrCtx) > 0 {
+				scope.SetContext("internal_error", internalErrCtx)
+			}
+		}
+
 		// Add request context if called from Fiber handler
 		if fiberCtx != nil {
 			scope.SetContext("request", map[string]any{
@@ -105,15 +137,33 @@ func CaptureEventForSlog(ctx context.Context, r slog.Record, args []slog.Attr) {
 			}, nil)
 		}
 
-		// Capture the event (exception if error present, otherwise message)
-		if errorValue != nil {
+		// Capture the event
+		// For ERROR and WARN levels, always capture as exception for better Sentry tracking
+		// even if no Go error object exists - create a synthetic error from log data
+		if errorValue != nil || r.Level >= slog.LevelWarn {
 			scope.SetTag("error_captured", "true")
+
+			// Use existing error or create synthetic error for ERROR/WARN logs
+			captureError := errorValue
+			if captureError == nil {
+				// Create meaningful error from log context
+				// Try to use details, message, or other meaningful data from extra
+				errorMsg := r.Message
+				if details, ok := extra["details"].(string); ok && details != "" {
+					errorMsg = details
+				} else if msg, ok := extra["message"].(string); ok && msg != "" {
+					errorMsg = msg
+				}
+				captureError = fmt.Errorf("%s", errorMsg)
+			}
+
 			if hub != nil {
-				hub.CaptureException(errorValue)
+				hub.CaptureException(captureError)
 			} else {
-				sentry.CaptureException(errorValue)
+				sentry.CaptureException(captureError)
 			}
 		} else {
+			// For INFO and DEBUG, use CaptureMessage
 			if hub != nil {
 				hub.CaptureMessage(r.Message)
 			} else {

@@ -27,6 +27,7 @@ func Handle(ctx context.Context, err error, c *fiber.Ctx) (int, *HttpResponse) {
 			handler.Log.ErrorContext(
 				ctx,
 				"Handled internal error",
+				core.ErrAttr(internalErr),
 				slog.String("details", internalErr.Details),
 				slog.String("file", internalErr.File),
 				slog.String("message", internalErr.Message),
@@ -81,6 +82,7 @@ func LogErri(ctx context.Context, internalErr *Erri, logger *slog.Logger, c *fib
 	logger.ErrorContext(
 		ctx,
 		"Logged internal error",
+		core.ErrAttr(internalErr),
 		slog.String("details", internalErr.Details),
 		slog.String("file", internalErr.File),
 		slog.String("message", internalErr.Message),
