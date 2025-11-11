@@ -44,3 +44,17 @@ func IsSentryEnabled() bool {
 func SetSentryEnabled(enabled bool) {
 	config.SetSentryEnabled(enabled)
 }
+
+// GetSentryMinHTTPStatus returns the minimum HTTP status code to send to Sentry
+func GetSentryMinHTTPStatus() int {
+	return config.GetSentryMinHTTPStatus()
+}
+
+// SetSentryMinHTTPStatus sets the minimum HTTP status code to send to Sentry
+// Examples:
+//   - 500: Only server errors (5xx) - default
+//   - 400: Client and server errors (4xx and 5xx)
+//   - 0: All errors regardless of status code
+func SetSentryMinHTTPStatus(minStatus int) {
+	config.SetSentryMinHTTPStatus(minStatus)
+}

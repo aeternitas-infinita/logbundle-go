@@ -2,16 +2,14 @@
 
 A comprehensive Go logging and error handling library designed for production applications with deep integration for Fiber web framework and Sentry error tracking.
 
-[![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue.svg)](https://golang.org/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-
 ## Features
 
 - **Structured Logging**: Built on Go's standard `log/slog` with custom formatting
 - **Rich Error Types**: Pre-defined error categories with automatic HTTP status mapping
 - **Stack Trace Capture**: Automatic stack trace collection with intelligent frame filtering
+- **Panic Recovery**: Automatic panic recovery middleware prevents application crashes
 - **Fiber Integration**: Drop-in error handler and middleware for Fiber applications
-- **Sentry Integration**: Automatic error reporting with context enrichment
+- **Sentry Integration**: Automatic error reporting with context enrichment and HTTP status filtering
 - **RFC 7807 Compliant**: Problem Details for HTTP APIs standard support
 - **Validation Errors**: Field-level validation error collection and reporting
 - **Thread-Safe**: Concurrent-safe operations with mutex protection
@@ -172,10 +170,11 @@ func main() {
         ErrorHandler: lgfiber.ErrorHandler,
     })
 
-    // Add middleware (optional but recommended)
-    app.Use(lgfiber.BreadcrumbsMiddleware())
-    app.Use(lgfiber.ContextEnrichmentMiddleware())
-    app.Use(lgfiber.PerformanceMiddleware())
+    // Add middleware (recommended)
+    app.Use(lgfiber.RecoverMiddleware())              // Panic recovery
+    app.Use(lgfiber.BreadcrumbsMiddleware())          // Request breadcrumbs
+    app.Use(lgfiber.ContextEnrichmentMiddleware())    // Request context
+    app.Use(lgfiber.PerformanceMiddleware())          // Performance tracking
 
     app.Listen(":3000")
 }
@@ -223,6 +222,14 @@ func handler(c *fiber.Ctx) error {
 ```
 
 ### Middleware Details
+
+#### RecoverMiddleware
+Recovers from panics and prevents application crashes:
+- Captures panic value and stack trace
+- Sends panic details to Sentry (if enabled)
+- Logs comprehensive panic information
+- Returns 500 error to client
+- **IMPORTANT**: Place this first in your middleware chain
 
 #### BreadcrumbsMiddleware
 Adds HTTP request breadcrumbs to Sentry for request flow tracking:
@@ -272,13 +279,27 @@ func main() {
 
 ### Control Sentry Reporting
 
+#### Filter by HTTP Status Code
+
+```go
+// Configure minimum HTTP status to send to Sentry
+logbundle.SetSentryMinHTTPStatus(500)  // Only 5xx errors (default)
+logbundle.SetSentryMinHTTPStatus(400)  // 4xx and 5xx errors
+logbundle.SetSentryMinHTTPStatus(0)    // All errors
+
+// Get current setting
+minStatus := logbundle.GetSentryMinHTTPStatus()
+```
+
+#### Skip Specific Errors
+
 ```go
 // Skip Sentry for specific errors
 err := lgerr.NotFound("Resource", id).
     IgnoreSentry()  // Won't be sent to Sentry
 
-// By default, only 5xx errors and TypeInternal are sent to Sentry
-// Configure this behavior in lgfiber.shouldSendToSentry()
+// Unhandled errors and panics are always sent to Sentry (if enabled)
+// Generic errors are converted to lgerr.Internal automatically
 ```
 
 ### Custom Sentry Context

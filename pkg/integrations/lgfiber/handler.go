@@ -17,7 +17,7 @@ import (
 )
 
 // shouldSendToSentry determines if an error should be reported to Sentry
-// Reports if: Sentry is enabled AND (status >= 500 OR error type is internal) AND hub exists AND not explicitly ignored
+// Reports if: Sentry is enabled AND status >= minHTTPStatus AND hub exists AND not explicitly ignored
 func shouldSendToSentry(lgErr *lgerr.Error, hub *sentry.Hub) bool {
 	// Check if Sentry is globally enabled
 	if !config.IsSentryEnabled() {
@@ -29,9 +29,14 @@ func shouldSendToSentry(lgErr *lgerr.Error, hub *sentry.Hub) bool {
 	}
 
 	statusCode := lgErr.HTTPStatus()
-	isInternal := lgErr.Type() == lgerr.TypeInternal
+	minStatus := config.GetSentryMinHTTPStatus()
 
-	return statusCode >= 500 || isInternal
+	// If minStatus is 0, send all errors
+	if minStatus == 0 {
+		return true
+	}
+
+	return statusCode >= minStatus
 }
 
 // captureToSentry captures an lgerr.Error to Sentry with full context
@@ -230,28 +235,21 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 	// Try to extract lgerr.Error
 	var lgErr *lgerr.Error
 	if !errors.As(err, &lgErr) {
-		// Not an lgerr.Error - handle as generic error
+		// Not an lgerr.Error - convert to lgerr.Internal for consistent handling
 		code := fiber.StatusInternalServerError
 		var fiberErr *fiber.Error
 		if errors.As(err, &fiberErr) {
 			code = fiberErr.Code
 		}
 
-		// Log generic error
-		log := handler.GetInternalLogger()
-		log.ErrorContext(c.UserContext(), "Generic error",
-			slog.String("error", err.Error()),
-			slog.String("error_type", fmt.Sprintf("%T", err)),
-			slog.Int("status_code", code),
-			slog.String("url", c.OriginalURL()),
-			slog.String("method", c.Method()),
-		)
+		// Create lgerr.Error from generic error
+		lgErr = lgerr.Internal(err.Error()).
+			Wrap(err).
+			WithHTTPStatus(code).
+			WithTitle("Internal Server Error").
+			WithContext("original_error_type", fmt.Sprintf("%T", err))
 
-		// Return simple error response
-		return c.Status(code).JSON(lgerr.ErrorResponse{
-			Title: "Internal Server Error",
-			Detail: err.Error(),
-		})
+		// Continue with normal lgerr.Error handling flow
 	}
 
 	// Handle lgerr.Error

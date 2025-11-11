@@ -3,11 +3,17 @@ package lgfiber
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"time"
 
 	"github.com/getsentry/sentry-go"
 	sentryfiber "github.com/getsentry/sentry-go/fiber"
 	"github.com/gofiber/fiber/v2"
+
+	"github.com/aeternitas-infinita/logbundle-go/pkg/config"
+	"github.com/aeternitas-infinita/logbundle-go/pkg/core"
+	"github.com/aeternitas-infinita/logbundle-go/pkg/handler"
 )
 
 // userIDProvider interface for extracting user ID from context locals
@@ -228,4 +234,117 @@ func SetContext(c *fiber.Ctx, key string, value map[string]any) {
 		return
 	}
 	hub.Scope().SetContext(key, value)
+}
+
+// RecoverMiddleware recovers from panics and prevents application crashes
+// Captures panic details and sends them to Sentry (if enabled)
+// This should be placed after the Sentry middleware but before other application middleware
+//
+// Usage:
+//
+//	app.Use(lgfiber.RecoverMiddleware())
+func RecoverMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		defer func() {
+			if r := recover(); r != nil {
+				// Capture stack trace
+				stackTrace := string(debug.Stack())
+				errorLoc, file, line := core.ExtractErrorLocationWithDetails(stackTrace)
+
+				// Get Sentry hub
+				hub := sentryfiber.GetHubFromContext(c)
+				var sentryEventID *sentry.EventID
+
+				// Send to Sentry if enabled
+				if config.IsSentryEnabled() && hub != nil {
+					hub.WithScope(func(scope *sentry.Scope) {
+						scope.SetLevel(sentry.LevelFatal)
+						scope.SetTag("panic_recovered", "true")
+						scope.SetTag("error_source", "panic_recovery")
+
+						// Set panic details
+						scope.SetContext("panic_details", map[string]any{
+							"recovered_value": fmt.Sprintf("%v", r),
+							"stack_trace":     stackTrace,
+							"error_location":  errorLoc,
+						})
+
+						// Set request context
+						scope.SetContext("request", map[string]any{
+							"url":        c.OriginalURL(),
+							"method":     c.Method(),
+							"path":       c.Path(),
+							"route":      c.Route().Path,
+							"ip":         c.IP(),
+							"user_agent": c.Get("User-Agent"),
+						})
+
+						// Set source location if available
+						if file != "" && line > 0 {
+							scope.SetTag("panic_file", file)
+							scope.SetTag("panic_line", fmt.Sprintf("%d", line))
+							scope.SetContext("source", map[string]any{
+								"file": file,
+								"line": line,
+							})
+						}
+
+						// Set fingerprint for grouping
+						scope.SetFingerprint([]string{
+							"panic",
+							fmt.Sprintf("%v", r),
+							errorLoc,
+						})
+
+						// Add breadcrumb for the panic
+						hub.AddBreadcrumb(&sentry.Breadcrumb{
+							Type:     "error",
+							Category: "panic",
+							Message:  fmt.Sprintf("Panic recovered: %v", r),
+							Level:    sentry.LevelFatal,
+							Data: map[string]any{
+								"recovered_value": fmt.Sprintf("%v", r),
+								"location":        errorLoc,
+							},
+						}, nil)
+
+						// Capture the panic with context
+						sentryEventID = hub.RecoverWithContext(c.UserContext(), r)
+					})
+				}
+
+				// Log the panic
+				log := handler.GetInternalLogger()
+				logFields := []any{
+					slog.String("url", c.OriginalURL()),
+					slog.String("method", c.Method()),
+					slog.String("route", c.Route().Path),
+					slog.Any("panic_value", r),
+					slog.String("error_location", errorLoc),
+					slog.String("stack_trace", stackTrace),
+				}
+
+				if sentryEventID != nil {
+					logFields = append(logFields, slog.String("sentry_event_id", string(*sentryEventID)))
+				}
+
+				if file != "" && line > 0 {
+					logFields = append(logFields, slog.Any("source", slog.Source{
+						File: file,
+						Line: line,
+					}))
+				}
+
+				log.ErrorContext(c.UserContext(), "Panic recovered in HTTP handler", logFields...)
+
+				// Send 500 response to client
+				_ = c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"title":  "Internal Server Error",
+					"detail": "An unexpected error occurred",
+				})
+			}
+		}()
+
+		return c.Next()
+	}
 }
