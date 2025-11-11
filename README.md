@@ -9,7 +9,7 @@ A comprehensive Go logging and error handling library designed for production ap
 - **Stack Trace Capture**: Automatic stack trace collection with intelligent frame filtering
 - **Panic Recovery**: Automatic panic recovery middleware prevents application crashes
 - **Fiber Integration**: Drop-in error handler and middleware for Fiber applications
-- **Sentry Integration**: Automatic error reporting with context enrichment and HTTP status filtering
+- **Sentry Integration**: Automatic error reporting with context enrichment and HTTP status filtering (opt-in)
 - **RFC 7807 Compliant**: Problem Details for HTTP APIs standard support
 - **Validation Errors**: Field-level validation error collection and reporting
 - **Thread-Safe**: Concurrent-safe operations with mutex protection
@@ -172,15 +172,17 @@ import (
 )
 
 func main() {
-    // Initialize Sentry
+    // Initialize Sentry SDK
     sentry.Init(sentry.ClientOptions{
         Dsn:         os.Getenv("SENTRY_DSN"),
         Environment: os.Getenv("ENVIRONMENT"),
     })
     defer sentry.Flush(2 * time.Second)
 
-    // Enable logbundle Sentry integration
+    // ⚠️ REQUIRED: Enable Sentry integration (disabled by default)
     logbundle.SetSentryEnabled(true)
+
+    // Optional: Configure HTTP status filtering (default: 500)
     logbundle.SetSentryMinHTTPStatus(500) // Only 5xx errors
 
     app := fiber.New(fiber.Config{
@@ -247,12 +249,14 @@ The middleware **must** be registered in this specific order:
    - After all logbundle middleware
 
 **Why order matters:**
+
 - Sentry base middleware creates the hub - without it, all other middleware will fail silently
 - RecoverMiddleware must be early to catch panics from all subsequent middleware
 - Performance middleware should wrap the entire request lifecycle
 - Context enrichment before breadcrumbs ensures breadcrumbs have full context
 
 **Common mistakes:**
+
 ```go
 // ❌ WRONG - RecoverMiddleware before Sentry
 app.Use(lgfiber.RecoverMiddleware())
@@ -310,7 +314,9 @@ func handler(c *fiber.Ctx) error {
 ### Middleware Details
 
 #### RecoverMiddleware
+
 Recovers from panics and prevents application crashes:
+
 - Captures panic value and stack trace
 - Sends panic details to Sentry (if enabled)
 - Logs comprehensive panic information
@@ -318,20 +324,26 @@ Recovers from panics and prevents application crashes:
 - **CRITICAL**: Must be placed AFTER `sentryfiber.New()` but BEFORE other middleware
 
 #### BreadcrumbsMiddleware
+
 Adds HTTP request breadcrumbs to Sentry for request flow tracking:
+
 - Request start/end events
 - Duration and status code
 - Request details (URL, method, path)
 
 #### ContextEnrichmentMiddleware
+
 Enriches Sentry scope with request data:
+
 - HTTP method, route, host
 - Query and route parameters
 - User identification (if available)
 - Request headers and metadata
 
 #### PerformanceMiddleware
+
 Creates Sentry performance transactions:
+
 - Request duration tracking
 - Distributed tracing support
 - Transaction status based on HTTP status
@@ -340,6 +352,10 @@ Creates Sentry performance transactions:
 
 ### Enable/Disable Sentry
 
+**⚠️ IMPORTANT: Sentry is DISABLED by default!**
+
+You must explicitly enable it by calling `SetSentryEnabled(true)`. Without this, no events will be sent to Sentry.
+
 ```go
 import (
     "github.com/aeternitas-infinita/logbundle-go"
@@ -347,19 +363,25 @@ import (
 )
 
 func main() {
-    // Initialize Sentry
+    // Initialize Sentry SDK
     sentry.Init(sentry.ClientOptions{
-        Dsn: "your-dsn-here",
+        Dsn:         "your-dsn-here",
         Environment: "production",
     })
 
-    // Enable Sentry integration
+    // ⚠️ REQUIRED: Enable Sentry integration (disabled by default)
     logbundle.SetSentryEnabled(true)
+
+    // Optional: Configure HTTP status filtering
+    logbundle.SetSentryMinHTTPStatus(500) // Only 5xx errors (default)
 
     // Check if enabled
     if logbundle.IsSentryEnabled() {
-        // ...
+        // Sentry is active
     }
+
+    // Disable Sentry (for testing, etc.)
+    // logbundle.SetSentryEnabled(false)
 }
 ```
 
@@ -408,6 +430,7 @@ lgfiber.AddBreadcrumb(c, "database", "Query executed", sentry.LevelInfo, map[str
 ### 1. Use Appropriate Error Types
 
 Choose error types that match the situation:
+
 ```go
 // Good
 return lgerr.NotFound("User", userID)
@@ -420,6 +443,7 @@ return lgerr.Validation("email", "invalid format")
 ### 2. Add Context to Errors
 
 Always add relevant context:
+
 ```go
 return lgerr.Database("failed to insert record").
     WithContext("table", "users").
@@ -430,6 +454,7 @@ return lgerr.Database("failed to insert record").
 ### 3. Use Titles and Details for Client-Facing Errors
 
 Separate internal messages from public-facing ones:
+
 ```go
 return lgerr.BadInput("invalid email format: missing @ symbol").
     WithTitle("Invalid Email").
@@ -439,6 +464,7 @@ return lgerr.BadInput("invalid email format: missing @ symbol").
 ### 4. Handle Validation Errors Properly
 
 Group validation errors together:
+
 ```go
 if len(errors) > 0 {
     err := lgerr.Validation("form validation failed", "").
@@ -465,6 +491,7 @@ export log_level=warn
 ### 6. Use Context-Aware Logging
 
 Always use context-aware functions when context is available:
+
 ```go
 // Good
 logbundle.InfoCtx(ctx, "message")
@@ -507,6 +534,7 @@ err := lgerr.Internal("authentication failed").
 ## Examples
 
 See the [examples](./examples) directory for more detailed examples:
+
 - Basic logging setup
 - Fiber application with error handling
 - Custom error types
@@ -524,5 +552,6 @@ MIT License - see LICENSE file for details
 ## Support
 
 For issues and questions:
-- GitHub Issues: https://github.com/aeternitas-infinita/logbundle-go/issues
+
+- GitHub Issues: <https://github.com/aeternitas-infinita/logbundle-go/issues>
 - Documentation: [GoDoc](https://pkg.go.dev/github.com/aeternitas-infinita/logbundle-go)
