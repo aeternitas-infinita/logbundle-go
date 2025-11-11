@@ -160,24 +160,110 @@ if dbErr != nil {
 package main
 
 import (
+    "os"
+    "time"
+
+    "github.com/getsentry/sentry-go"
+    sentryfiber "github.com/getsentry/sentry-go/fiber"
     "github.com/gofiber/fiber/v2"
+
     "github.com/aeternitas-infinita/logbundle-go"
     "github.com/aeternitas-infinita/logbundle-go/pkg/integrations/lgfiber"
 )
 
 func main() {
+    // Initialize Sentry
+    sentry.Init(sentry.ClientOptions{
+        Dsn:         os.Getenv("SENTRY_DSN"),
+        Environment: os.Getenv("ENVIRONMENT"),
+    })
+    defer sentry.Flush(2 * time.Second)
+
+    // Enable logbundle Sentry integration
+    logbundle.SetSentryEnabled(true)
+    logbundle.SetSentryMinHTTPStatus(500) // Only 5xx errors
+
     app := fiber.New(fiber.Config{
         ErrorHandler: lgfiber.ErrorHandler,
     })
 
-    // Add middleware (recommended)
-    app.Use(lgfiber.RecoverMiddleware())              // Panic recovery
-    app.Use(lgfiber.BreadcrumbsMiddleware())          // Request breadcrumbs
-    app.Use(lgfiber.ContextEnrichmentMiddleware())    // Request context
-    app.Use(lgfiber.PerformanceMiddleware())          // Performance tracking
+    // ⚠️ MIDDLEWARE ORDER IS CRITICAL ⚠️
+
+    // 1. Sentry base middleware (MUST BE FIRST)
+    app.Use(sentryfiber.New(sentryfiber.Options{
+        Repanic:         true,
+        WaitForDelivery: false,
+        Timeout:         3 * time.Second,
+    }))
+
+    // 2. Panic recovery (MUST BE AFTER SENTRY)
+    app.Use(lgfiber.RecoverMiddleware())
+
+    // 3. Performance monitoring (creates transactions)
+    app.Use(lgfiber.PerformanceMiddleware())
+
+    // 4. Context enrichment (tags, request data)
+    app.Use(lgfiber.ContextEnrichmentMiddleware())
+
+    // 5. Breadcrumbs (request tracking)
+    app.Use(lgfiber.BreadcrumbsMiddleware())
+
+    // 6. Your application middleware
+    // app.Use(cors.New())
+    // app.Use(yourMiddleware...)
 
     app.Listen(":3000")
 }
+```
+
+### Middleware Order
+
+**⚠️ ORDER IS CRITICAL! ⚠️**
+
+The middleware **must** be registered in this specific order:
+
+1. **`sentryfiber.New()`** - MUST BE FIRST
+   - Initializes Sentry hub in context
+   - All other middleware depend on this
+
+2. **`lgfiber.RecoverMiddleware()`** - MUST BE AFTER SENTRY
+   - Catches panics before they crash your app
+   - Needs Sentry hub to report panics
+
+3. **`lgfiber.PerformanceMiddleware()`** - Creates performance transactions
+   - Tracks request duration and tracing
+   - Should be early to measure entire request
+
+4. **`lgfiber.ContextEnrichmentMiddleware()`** - Enriches Sentry context
+   - Adds request data, query params, user info
+   - Should be before breadcrumbs
+
+5. **`lgfiber.BreadcrumbsMiddleware()`** - Tracks request flow
+   - Logs request start/end events
+   - Should be after context enrichment
+
+6. **Your application middleware** - Place last
+   - CORS, rate limiting, auth, etc.
+   - After all logbundle middleware
+
+**Why order matters:**
+- Sentry base middleware creates the hub - without it, all other middleware will fail silently
+- RecoverMiddleware must be early to catch panics from all subsequent middleware
+- Performance middleware should wrap the entire request lifecycle
+- Context enrichment before breadcrumbs ensures breadcrumbs have full context
+
+**Common mistakes:**
+```go
+// ❌ WRONG - RecoverMiddleware before Sentry
+app.Use(lgfiber.RecoverMiddleware())
+app.Use(sentryfiber.New(...))  // Too late!
+
+// ❌ WRONG - Missing Sentry base middleware
+app.Use(lgfiber.RecoverMiddleware())  // Won't work without Sentry hub
+
+// ✅ CORRECT - Sentry first, then Recover
+app.Use(sentryfiber.New(...))
+app.Use(lgfiber.RecoverMiddleware())
 ```
 
 ### Using in Handlers
@@ -229,7 +315,7 @@ Recovers from panics and prevents application crashes:
 - Sends panic details to Sentry (if enabled)
 - Logs comprehensive panic information
 - Returns 500 error to client
-- **IMPORTANT**: Place this first in your middleware chain
+- **CRITICAL**: Must be placed AFTER `sentryfiber.New()` but BEFORE other middleware
 
 #### BreadcrumbsMiddleware
 Adds HTTP request breadcrumbs to Sentry for request flow tracking:

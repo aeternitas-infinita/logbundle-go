@@ -238,11 +238,16 @@ func SetContext(c *fiber.Ctx, key string, value map[string]any) {
 
 // RecoverMiddleware recovers from panics and prevents application crashes
 // Captures panic details and sends them to Sentry (if enabled)
-// This should be placed after the Sentry middleware but before other application middleware
 //
-// Usage:
+// CRITICAL: This middleware MUST be placed AFTER sentryfiber.New() but BEFORE other middleware
 //
-//	app.Use(lgfiber.RecoverMiddleware())
+// Correct order:
+//
+//	app.Use(sentryfiber.New(...))        // 1. FIRST - Initialize Sentry hub
+//	app.Use(lgfiber.RecoverMiddleware()) // 2. SECOND - Catch panics
+//	app.Use(otherMiddleware...)          // 3. Other middleware
+//
+// Without sentryfiber.New() first, panics won't be sent to Sentry
 func RecoverMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		defer func() {
