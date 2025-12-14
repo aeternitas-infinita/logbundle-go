@@ -9,8 +9,7 @@ import (
 	"github.com/getsentry/sentry-go"
 )
 
-func SentryDebug(ctx context.Context, log *slog.Logger, msg string, err error, extraData ...any) {
-	// Check context cancellation before expensive operations
+func SentryDebug(ctx context.Context, log *slog.Logger, msg string, extraData ...any) {
 	select {
 	case <-ctx.Done():
 		return
@@ -18,17 +17,13 @@ func SentryDebug(ctx context.Context, log *slog.Logger, msg string, err error, e
 	}
 
 	allArgs := make([]any, 0, len(extraData)+1)
-	if err != nil {
-		allArgs = append(allArgs, ErrAttr(err))
-	}
 	allArgs = append(allArgs, extraData...)
 	logger.LogWithSourceCtx(ctx, log, slog.LevelDebug, msg, allArgs...)
 
-	lgsentry.CaptureEvent(ctx, sentry.LevelDebug, msg, err, extraData...)
+	lgsentry.CaptureEvent(ctx, sentry.LevelDebug, msg, nil, extraData...)
 }
 
-func SentryInfo(ctx context.Context, log *slog.Logger, msg string, err error, extraData ...any) {
-	// Check context cancellation before expensive operations
+func SentryInfo(ctx context.Context, log *slog.Logger, msg string, extraData ...any) {
 	select {
 	case <-ctx.Done():
 		return
@@ -36,17 +31,13 @@ func SentryInfo(ctx context.Context, log *slog.Logger, msg string, err error, ex
 	}
 
 	allArgs := make([]any, 0, len(extraData)+1)
-	if err != nil {
-		allArgs = append(allArgs, ErrAttr(err))
-	}
 	allArgs = append(allArgs, extraData...)
 	logger.LogWithSourceCtx(ctx, log, slog.LevelInfo, msg, allArgs...)
 
-	lgsentry.CaptureEvent(ctx, sentry.LevelInfo, msg, err, extraData...)
+	lgsentry.CaptureEvent(ctx, sentry.LevelInfo, msg, nil, extraData...)
 }
 
 func SentryWarn(ctx context.Context, log *slog.Logger, msg string, err error, extraData ...any) {
-	// Check context cancellation before expensive operations
 	select {
 	case <-ctx.Done():
 		return
@@ -64,7 +55,6 @@ func SentryWarn(ctx context.Context, log *slog.Logger, msg string, err error, ex
 }
 
 func SentryError(ctx context.Context, log *slog.Logger, msg string, err error, extraData ...any) {
-	// Check context cancellation before expensive operations
 	select {
 	case <-ctx.Done():
 		return
