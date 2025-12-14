@@ -1,19 +1,23 @@
 package lgfiber
 
 import (
+	"log/slog"
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/aeternitas-infinita/logbundle-go"
+	"github.com/aeternitas-infinita/logbundle-go/internal/logger"
 	"github.com/aeternitas-infinita/logbundle-go/pkg/integrations/lgerr"
 )
 
 // ValidationConfig holds configuration for validation middleware
 type ValidationConfig struct {
+	// Logger instance for validation logging
+	Logger *slog.Logger
 	// Validator instance (if nil, uses default validator)
 	Validator *validator.Validate
 	// LocalsKey is the key used to store validated data in c.Locals (default: "body", "params", etc.)
@@ -24,13 +28,25 @@ type ValidationConfig struct {
 	Detail string
 }
 
-var defaultValidator = validator.New()
+var (
+	defaultValidator     *validator.Validate
+	defaultValidatorOnce sync.Once
+)
+
+// getDefaultValidator returns the default validator instance (lazy initialization)
+func getDefaultValidator() *validator.Validate {
+	defaultValidatorOnce.Do(func() {
+		defaultValidator = validator.New()
+	})
+	return defaultValidator
+}
 
 // parseValidationErrors converts validator.ValidationErrors to lgerr.ValidationError slice
 func parseValidationErrors(err error, dto interface{}) []lgerr.ValidationError {
-	var validationErrors []lgerr.ValidationError
-
 	if validatorErrs, ok := err.(validator.ValidationErrors); ok {
+		// Pre-allocate slice with exact capacity to avoid reallocation
+		validationErrors := make([]lgerr.ValidationError, 0, len(validatorErrs))
+
 		for _, fieldErr := range validatorErrs {
 			// Get the JSON field name from struct tag
 			fieldName := getJSONFieldName(dto, fieldErr.Field())
@@ -45,9 +61,10 @@ func parseValidationErrors(err error, dto interface{}) []lgerr.ValidationError {
 			}
 			validationErrors = append(validationErrors, validationErr)
 		}
+		return validationErrors
 	}
 
-	return validationErrors
+	return nil
 }
 
 // getJSONFieldName extracts the JSON field name from struct tag
@@ -125,7 +142,7 @@ func genericValidationMiddleware[T any](
 ) fiber.Handler {
 	// Set defaults
 	if config.Validator == nil {
-		config.Validator = defaultValidator
+		config.Validator = getDefaultValidator()
 	}
 	if config.Title == "" {
 		config.Title = "Validation Error"
@@ -136,10 +153,12 @@ func genericValidationMiddleware[T any](
 
 		// Parse the request
 		if err := parserFunc(c, &dto); err != nil {
-			logbundle.WarnCtx(c.UserContext(), "Failed to parse request",
-				"error", err.Error(),
-				"parser", config.LocalsKey,
-			)
+			if config.Logger != nil {
+				logger.LogWithSourceCtx(c.UserContext(), config.Logger, slog.LevelWarn, "Failed to parse request",
+					"error", err.Error(),
+					"parser", config.LocalsKey,
+				)
+			}
 
 			return c.Status(http.StatusBadRequest).JSON(lgerr.ErrorResponse{
 				Title:  "Invalid Request Format",
@@ -152,10 +171,12 @@ func genericValidationMiddleware[T any](
 			validationErrors := parseValidationErrors(err, dto)
 
 			if len(validationErrors) > 0 {
-				logbundle.DebugCtx(c.UserContext(), "Validation failed",
-					"errors_count", len(validationErrors),
-					"parser", config.LocalsKey,
-				)
+				if config.Logger != nil {
+					logger.LogWithSourceCtx(c.UserContext(), config.Logger, slog.LevelDebug, "Validation failed",
+						"errors_count", len(validationErrors),
+						"parser", config.LocalsKey,
+					)
+				}
 
 				response := lgerr.ErrorResponse{
 					Title:  config.Title,

@@ -76,30 +76,54 @@ func parseFileLocation(nextLine string) (filePath, file string, lineNum int) {
 // ExtractErrorLocationWithDetails extracts the error location from a stack trace string,
 // filtering out internal runtime and middleware frames to find the actual application code location
 func ExtractErrorLocationWithDetails(stackTrace string) (string, string, int) {
-	lines := strings.Split(stackTrace, "\n")
+	// Use early exit optimization: search for first .go: occurrence, then validate
+	const (
+		goExtension = ".go:"
+		goroutine   = "goroutine "
+	)
 
-	for i := 0; i < len(lines)-1; i++ {
-		line := strings.TrimSpace(lines[i])
+	var i int
+	for i < len(stackTrace) {
+		// Find next line start
+		lineStart := i
+		lineEnd := strings.IndexByte(stackTrace[i:], '\n')
+		if lineEnd == -1 {
+			lineEnd = len(stackTrace)
+		} else {
+			lineEnd += i
+		}
+
+		line := strings.TrimSpace(stackTrace[lineStart:lineEnd])
+		i = lineEnd + 1
 
 		// Skip empty lines and goroutine headers
-		if line == "" || strings.HasPrefix(line, "goroutine ") {
+		if line == "" || strings.HasPrefix(line, goroutine) {
 			continue
 		}
 
-		// Check if next line contains file location
-		if i+1 < len(lines) {
-			nextLine := strings.TrimSpace(lines[i+1])
+		// Check if next line contains file location (peek ahead without full split)
+		if i < len(stackTrace) {
+			nextLineStart := i
+			nextLineEnd := strings.IndexByte(stackTrace[i:], '\n')
+			if nextLineEnd == -1 {
+				nextLineEnd = len(stackTrace)
+			} else {
+				nextLineEnd += i
+			}
 
-			if strings.Contains(nextLine, ".go:") {
+			nextLine := strings.TrimSpace(stackTrace[nextLineStart:nextLineEnd])
+
+			// Fast path: check for .go: without allocation
+			if idx := strings.Index(nextLine, goExtension); idx != -1 {
 				normalizedPath := strings.ReplaceAll(nextLine, "\\", "/")
 
 				// Skip internal and middleware frames
-				if shouldSkipFrame(line, normalizedPath) {
-					continue
+				if !shouldSkipFrame(line, normalizedPath) {
+					return parseFileLocation(nextLine)
 				}
-
-				return parseFileLocation(nextLine)
 			}
+
+			i = nextLineEnd + 1
 		}
 	}
 

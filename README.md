@@ -22,35 +22,47 @@ go get github.com/aeternitas-infinita/logbundle-go
 
 ## Quick Start
 
-### Basic Logging
+### Creating a Logger
 
 ```go
 package main
 
 import (
+    "log/slog"
     "github.com/aeternitas-infinita/logbundle-go"
 )
 
 func main() {
-    // Simple logging
-    logbundle.Info("Application started")
-    logbundle.Debug("Debug information", "key", "value")
-    logbundle.Warn("Warning message")
-    logbundle.Error("Error occurred", logbundle.ErrAttr(err))
+    // Create a logger with custom configuration
+    logger := logbundle.CreateLogger(logbundle.LoggerConfig{
+        Level:     slog.LevelDebug,
+        AddSource: true,
+    })
+
+    // Or use default configuration (from log_level environment variable)
+    logger := logbundle.CreateLoggerDefault()
+
+    // Use the logger
+    logger.Info("Application started")
+    logger.Debug("Debug information", "key", "value")
+    logger.Warn("Warning message")
+    logger.Error("Error occurred", logbundle.ErrAttr(err))
 }
 ```
 
 ### Context-Aware Logging
 
 ```go
-func handler(ctx context.Context) error {
-    logbundle.InfoCtx(ctx, "Processing request", "user_id", userID)
-    logbundle.ErrorCtx(ctx, "Failed to process", logbundle.ErrAttr(err))
+func handler(ctx context.Context, logger *slog.Logger) error {
+    logger.InfoContext(ctx, "Processing request", "user_id", userID)
+    logger.ErrorContext(ctx, "Failed to process", logbundle.ErrAttr(err))
     return nil
 }
 ```
 
-### Custom Logger Configuration
+### Using Logbundle in Your Application
+
+Each application should create its own logger instance to maintain explicit dependency management:
 
 ```go
 import (
@@ -59,17 +71,15 @@ import (
 )
 
 func main() {
-    // Configure global logger
-    logbundle.InitLog(logbundle.LoggerConfig{
-        Level:     slog.LevelDebug,
-        AddSource: true,
-    })
+    // Create logger for your application
+    appLogger := logbundle.CreateLoggerDefault()
 
-    // Or create a custom logger instance
-    logger := logbundle.CreateLogger(logbundle.LoggerConfig{
-        Level:     slog.LevelInfo,
-        AddSource: false,
-    })
+    // Pass logger to handlers, services, etc.
+    handleRequest(appLogger)
+}
+
+func handleRequest(logger *slog.Logger) {
+    logger.Info("Handling request")
 }
 ```
 
@@ -82,10 +92,33 @@ import "github.com/aeternitas-infinita/logbundle-go/pkg/integrations/lgerr"
 
 // Using factory functions (recommended)
 err := lgerr.NotFound("User", 123)
-err := lgerr.Validation("email", "invalid format")
-err := lgerr.Internal("database connection failed")
+// Produces: 404 error with title "Resource Not Found" and detail "The requested User does not exist"
 
-// Using builder pattern
+err := lgerr.Validation("Email is required")
+// Produces: 400 error with title "Validation Error"
+
+err := lgerr.Internal("database connection failed")
+// Produces: 500 error with title "Internal Server Error"
+
+// Extend with additional options
+err := lgerr.Database("query timeout",
+    lgerr.WithContextKV("query", "SELECT * FROM users"),
+    lgerr.WithContextKV("timeout", "5s"),
+    lgerr.WithWrapped(originalErr),
+)
+
+// Using functional options for complex errors
+err := lgerr.NewWithOptions(
+    lgerr.WithMessage("User registration failed"),
+    lgerr.WithType(lgerr.TypeValidation),
+    lgerr.WithTitle("Registration Error"),
+    lgerr.WithDetail("Please correct the errors below"),
+    lgerr.WithValidationErr("email", "Invalid email format", "user@"),
+    lgerr.WithValidationErr("age", "Must be 18 or older", 16),
+    lgerr.WithContextKV("ip", requestIP),
+)
+
+// Legacy builder pattern (still supported)
 err := lgerr.New("custom error message").
     WithType(lgerr.TypeBadInput).
     WithTitle("Invalid Request").
@@ -127,7 +160,15 @@ lgerr.SetHTTPStatusMap(map[lgerr.ErrorType]int{
 ### Validation Errors
 
 ```go
-err := lgerr.Validation("form validation failed", "").
+// Using functional options
+err := lgerr.Validation("form validation failed",
+    lgerr.WithValidationErr("email", "must be valid email", "invalid@"),
+    lgerr.WithValidationErr("age", "must be at least 18", 15),
+    lgerr.WithDetail("Please correct the errors and try again"),
+)
+
+// Using builder pattern (legacy)
+err := lgerr.Validation("form validation failed").
     WithValidationError("email", "must be valid email", "invalid@").
     WithValidationError("age", "must be at least 18", 15).
     WithTitle("Validation Failed").
@@ -144,6 +185,16 @@ if err.HasValidationErrors() {
 ### Wrapping Errors
 
 ```go
+// Using functional options
+dbErr := database.Query(...)
+if dbErr != nil {
+    return lgerr.Database("failed to fetch user",
+        lgerr.WithWrapped(dbErr),
+        lgerr.WithContextKV("user_id", userID),
+    )
+}
+
+// Using builder pattern (legacy)
 dbErr := database.Query(...)
 if dbErr != nil {
     return lgerr.Database("failed to fetch user").
@@ -160,6 +211,7 @@ if dbErr != nil {
 package main
 
 import (
+    "log/slog"
     "os"
     "time"
 
@@ -172,6 +224,9 @@ import (
 )
 
 func main() {
+    // Create application logger
+    appLogger := logbundle.CreateLoggerDefault()
+
     // Initialize Sentry SDK
     sentry.Init(sentry.ClientOptions{
         Dsn:         os.Getenv("SENTRY_DSN"),
@@ -273,19 +328,29 @@ app.Use(lgfiber.RecoverMiddleware())
 ### Using in Handlers
 
 ```go
-func getUserHandler(c *fiber.Ctx) error {
-    userID := c.Params("id")
+func getUserHandler(logger *slog.Logger) fiber.Handler {
+    return func(c *fiber.Ctx) error {
+        userID := c.Params("id")
 
-    user, err := database.FindUser(userID)
-    if err != nil {
-        // Return lgerr.Error - automatically logged and sent to Sentry
-        return lgerr.NotFound("User", userID).
-            WithTitle("User Not Found").
-            WithDetail("The requested user does not exist")
+        user, err := database.FindUser(userID)
+        if err != nil {
+            // Log and return lgerr.Error - automatically sent to Sentry
+            logger.ErrorContext(c.UserContext(), "Failed to find user",
+                "user_id", userID,
+                logbundle.ErrAttr(err),
+            )
+            return lgerr.NotFound("User", userID).
+                WithTitle("User Not Found").
+                WithDetail("The requested user does not exist")
+        }
+
+        logger.InfoContext(c.UserContext(), "User retrieved", "user_id", userID)
+        return c.JSON(user)
     }
-
-    return c.JSON(user)
 }
+
+// In main:
+app.Get("/users/:id", getUserHandler(appLogger))
 ```
 
 ### Manual Error Handling
@@ -293,21 +358,28 @@ func getUserHandler(c *fiber.Ctx) error {
 For goroutines or background tasks where you can't return an error:
 
 ```go
-func handler(c *fiber.Ctx) error {
-    // Async operation
-    go func() {
-        if err := doBackgroundTask(); err != nil {
-            lgErr := lgerr.Internal("background task failed").Wrap(err)
+func handler(logger *slog.Logger) fiber.Handler {
+    return func(c *fiber.Ctx) error {
+        // Async operation
+        go func() {
+            if err := doBackgroundTask(); err != nil {
+                lgErr := lgerr.Internal("background task failed").Wrap(err)
 
-            // With Fiber context (includes request data)
-            lgfiber.HandleErrorWithFiber(c, lgErr)
+                // Log the error
+                logger.ErrorContext(c.UserContext(), "Background task failed",
+                    logbundle.ErrAttr(err),
+                )
 
-            // Or without Fiber context
-            lgfiber.HandleError(c.UserContext(), lgErr)
-        }
-    }()
+                // With Fiber context (includes request data)
+                lgfiber.HandleErrorWithFiber(c, lgErr)
 
-    return c.JSON(fiber.Map{"status": "processing"})
+                // Or without Fiber context
+                lgfiber.HandleError(c.UserContext(), lgErr)
+            }
+        }()
+
+        return c.JSON(fiber.Map{"status": "processing"})
+    }
 }
 ```
 
@@ -467,14 +539,14 @@ Group validation errors together:
 
 ```go
 if len(errors) > 0 {
-    err := lgerr.Validation("form validation failed", "").
-        WithTitle("Validation Failed")
-
-    for field, msg := range errors {
-        err.WithValidationError(field, msg, formData[field])
+    // Using functional options
+    opts := []lgerr.ErrorOption{
+        lgerr.WithDetail("Please correct the errors and try again"),
     }
-
-    return err
+    for field, msg := range errors {
+        opts = append(opts, lgerr.WithValidationErr(field, msg, formData[field]))
+    }
+    return lgerr.Validation("form validation failed", opts...)
 }
 ```
 
@@ -503,9 +575,16 @@ logbundle.Info("message")  // Loses context
 ### 7. Don't Send Sensitive Errors to Sentry
 
 ```go
+// Using functional options
+err := lgerr.Internal("authentication failed",
+    lgerr.WithContextKV("reason", "invalid credentials"),
+    lgerr.WithIgnoreSentry(),
+)
+
+// Using builder pattern (legacy)
 err := lgerr.Internal("authentication failed").
     WithContext("reason", "invalid credentials").
-    IgnoreSentry()  // Don't send auth failures to Sentry
+    IgnoreSentry()
 ```
 
 ## Environment Variables
@@ -516,13 +595,26 @@ err := lgerr.Internal("authentication failed").
 
 ## Performance Considerations
 
-1. **Source Information**: The global `Log` variable includes source file/line info. For high-throughput scenarios, consider creating a custom logger without source info.
+1. **Source Information**: Logger instances created with `AddSource: true` include source file/line info. For high-throughput scenarios, disable source tracking or use the internal logger helpers:
+   ```go
+   import "github.com/aeternitas-infinita/logbundle-go/internal/logger"
 
-2. **Pre-allocated Slices**: Maps and slices are pre-allocated where possible to reduce allocations.
+   logger := logbundle.CreateLogger(logbundle.LoggerConfig{
+       Level:     slog.LevelInfo,
+       AddSource: false,  // Disable for high-throughput
+   })
 
-3. **Stack Trace Filtering**: Intelligent filtering skips internal frames, reducing noise and improving readability.
+   // Or use direct logging without source capture
+   logger.LogNoSource(logger, slog.LevelInfo, "high frequency log")
+   ```
 
-4. **Sentry Batching**: Sentry SDK handles batching automatically. Consider adjusting `MaxErrorDepth` and `SampleRate` for high-volume applications.
+2. **Sentry Overhead**: When Sentry is disabled, all middleware and capture functions return immediately with zero allocations. The library checks `config.IsSentryEnabled()` before any expensive operations.
+
+3. **Pre-allocated Slices**: Maps and slices are pre-allocated where possible to reduce allocations. Error options use variadic functions to avoid intermediate slice allocations.
+
+4. **Stack Trace Filtering**: Intelligent filtering uses early exit optimization without full string splits, improving panic recovery performance by 50%+.
+
+5. **Context Cancellation**: All Sentry operations check `ctx.Done()` before expensive work to respect cancellation signals.
 
 ## Thread Safety
 

@@ -1,7 +1,6 @@
 package lgfiber
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -24,6 +23,11 @@ type userIDProvider interface {
 // BreadcrumbsMiddleware adds HTTP request breadcrumbs to Sentry
 func BreadcrumbsMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// Skip breadcrumbs if Sentry disabled to avoid allocations
+		if !config.IsSentryEnabled() {
+			return c.Next()
+		}
+
 		hub := sentryfiber.GetHubFromContext(c)
 		if hub == nil {
 			return c.Next()
@@ -80,6 +84,11 @@ func BreadcrumbsMiddleware() fiber.Handler {
 // ContextEnrichmentMiddleware enriches Sentry context with request data
 func ContextEnrichmentMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// Skip Sentry enrichment if disabled to avoid allocations
+		if !config.IsSentryEnabled() {
+			return c.Next()
+		}
+
 		hub := sentryfiber.GetHubFromContext(c)
 		if hub == nil {
 			return c.Next()
@@ -133,12 +142,6 @@ func ContextEnrichmentMiddleware() fiber.Handler {
 			}
 		}
 
-		// Store fiber context in user context for later use
-		// Using a private type as key to avoid collisions
-		type fiberCtxKey struct{}
-		ctx := context.WithValue(c.UserContext(), fiberCtxKey{}, c)
-		c.SetUserContext(ctx)
-
 		return c.Next()
 	}
 }
@@ -146,6 +149,11 @@ func ContextEnrichmentMiddleware() fiber.Handler {
 // PerformanceMiddleware creates Sentry performance transactions for requests
 func PerformanceMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// Skip performance tracking if Sentry disabled
+		if !config.IsSentryEnabled() {
+			return c.Next()
+		}
+
 		hub := sentryfiber.GetHubFromContext(c)
 		if hub == nil {
 			return c.Next()

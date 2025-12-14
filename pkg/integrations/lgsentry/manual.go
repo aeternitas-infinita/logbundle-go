@@ -19,6 +19,15 @@ func CaptureEvent(ctx context.Context, level sentry.Level, msg string, err error
 		return
 	}
 
+	// Check context cancellation before expensive operations
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+	}
+
 	var hub *sentry.Hub
 	var fiberCtx *fiber.Ctx
 

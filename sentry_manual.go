@@ -2,51 +2,81 @@ package logbundle
 
 import (
 	"context"
+	"log/slog"
 
+	"github.com/aeternitas-infinita/logbundle-go/internal/logger"
 	"github.com/aeternitas-infinita/logbundle-go/pkg/integrations/lgsentry"
 	"github.com/getsentry/sentry-go"
 )
 
-func SentryDebug(ctx context.Context, msg string, err error, extraData ...any) {
+func SentryDebug(ctx context.Context, log *slog.Logger, msg string, err error, extraData ...any) {
+	// Check context cancellation before expensive operations
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	allArgs := make([]any, 0, len(extraData)+1)
 	if err != nil {
 		allArgs = append(allArgs, ErrAttr(err))
 	}
 	allArgs = append(allArgs, extraData...)
-	DebugCtx(ctx, msg, allArgs...)
+	logger.LogWithSourceCtx(ctx, log, slog.LevelDebug, msg, allArgs...)
 
 	lgsentry.CaptureEvent(ctx, sentry.LevelDebug, msg, err, extraData...)
 }
 
-func SentryInfo(ctx context.Context, msg string, err error, extraData ...any) {
+func SentryInfo(ctx context.Context, log *slog.Logger, msg string, err error, extraData ...any) {
+	// Check context cancellation before expensive operations
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	allArgs := make([]any, 0, len(extraData)+1)
 	if err != nil {
 		allArgs = append(allArgs, ErrAttr(err))
 	}
 	allArgs = append(allArgs, extraData...)
-	InfoCtx(ctx, msg, allArgs...)
+	logger.LogWithSourceCtx(ctx, log, slog.LevelInfo, msg, allArgs...)
 
 	lgsentry.CaptureEvent(ctx, sentry.LevelInfo, msg, err, extraData...)
 }
 
-func SentryWarn(ctx context.Context, msg string, err error, extraData ...any) {
+func SentryWarn(ctx context.Context, log *slog.Logger, msg string, err error, extraData ...any) {
+	// Check context cancellation before expensive operations
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	allArgs := make([]any, 0, len(extraData)+1)
 	if err != nil {
 		allArgs = append(allArgs, ErrAttr(err))
 	}
 	allArgs = append(allArgs, extraData...)
-	WarnCtx(ctx, msg, allArgs...)
+	logger.LogWithSourceCtx(ctx, log, slog.LevelWarn, msg, allArgs...)
 
 	lgsentry.CaptureEvent(ctx, sentry.LevelWarning, msg, err, extraData...)
 }
 
-func SentryError(ctx context.Context, msg string, err error, extraData ...any) {
+func SentryError(ctx context.Context, log *slog.Logger, msg string, err error, extraData ...any) {
+	// Check context cancellation before expensive operations
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	allArgs := make([]any, 0, len(extraData)+1)
 	if err != nil {
 		allArgs = append(allArgs, ErrAttr(err))
 	}
 	allArgs = append(allArgs, extraData...)
-	ErrorCtx(ctx, msg, allArgs...)
+	logger.LogWithSourceCtx(ctx, log, slog.LevelError, msg, allArgs...)
 
 	lgsentry.CaptureEvent(ctx, sentry.LevelError, msg, err, extraData...)
 }
