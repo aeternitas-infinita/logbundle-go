@@ -129,3 +129,16 @@ func ExtractErrorLocationWithDetails(stackTrace string) (string, string, int) {
 
 	return "unknown location", "", 0
 }
+
+// TruncateString truncates the input string to the specified maximum number of characters (runes).
+func TruncateString(s string, maxChars int) string {
+	if maxChars <= 0 {
+		return ""
+	}
+
+	runes := []rune(s)
+	if len(runes) <= maxChars {
+		return s
+	}
+	return string(runes[:maxChars])
+}
