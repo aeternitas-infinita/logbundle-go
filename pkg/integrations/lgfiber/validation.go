@@ -57,6 +57,21 @@ func getDefaultValidator() *validator.Validate {
 	return defaultValidator
 }
 
+// SetDefaultValidator sets a custom default validator instance
+// Call this at application startup to use a custom validator with additional rules
+func SetDefaultValidator(v *validator.Validate) {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	if v != nil {
+		defaultValidator = v
+	}
+}
+
+// GetDefaultValidator returns the current default validator instance
+func GetDefaultValidator() *validator.Validate {
+	return getDefaultValidator()
+}
+
 // init initializes all default validation configs at package load time
 func init() {
 	defaultBodyConfig = ValidationConfig{
@@ -193,6 +208,7 @@ func ResetValidationConfigs() {
 	configMutex.Lock()
 	defer configMutex.Unlock()
 	defaultGlobalLogger = nil
+	defaultValidator = nil
 
 	// Re-initialize to defaults
 	defaultBodyConfig = ValidationConfig{
