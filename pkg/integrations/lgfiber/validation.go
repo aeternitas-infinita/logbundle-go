@@ -414,7 +414,7 @@ func BodyValidationMiddleware[T any]() fiber.Handler {
 	}
 	configMutex.RUnlock()
 
-	return genericValidationMiddleware[T](
+	return genericValidationMiddleware(
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.BodyParser(dto) },
 		config,
 	)
@@ -452,7 +452,7 @@ func QueryValidationMiddleware[T any]() fiber.Handler {
 	}
 	configMutex.RUnlock()
 
-	return genericValidationMiddleware[T](
+	return genericValidationMiddleware(
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.QueryParser(dto) },
 		config,
 	)
@@ -489,7 +489,7 @@ func ParamsValidationMiddleware[T any]() fiber.Handler {
 	}
 	configMutex.RUnlock()
 
-	return genericValidationMiddleware[T](
+	return genericValidationMiddleware(
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.ParamsParser(dto) },
 		config,
 	)
@@ -527,7 +527,7 @@ func HeadersValidationMiddleware[T any]() fiber.Handler {
 	}
 	configMutex.RUnlock()
 
-	return genericValidationMiddleware[T](
+	return genericValidationMiddleware(
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.ReqHeaderParser(dto) },
 		config,
 	)
@@ -557,28 +557,32 @@ func HeadersValidationMiddleware[T any]() fiber.Handler {
 //	    body := c.Locals("form_data").(CreateUserRequest)
 //	    // Use validated body...
 //	}
-func FormDataValidationMiddleware[T any](formFieldName string) fiber.Handler {
-	if formFieldName == "" {
-		formFieldName = "json_data"
+func FormDataValidationMiddleware[T any](formFieldName *string) fiber.Handler {
+	fieldName := "json_data"
+	if formFieldName != nil && *formFieldName != "" {
+		fieldName = *formFieldName
 	}
 
 	// Capture global config once at middleware creation (not per-request)
 	configMutex.RLock()
-	config := defaultBodyConfig
+	config := ValidationConfig{
+		Logger:    defaultBodyConfig.Logger,
+		Validator: defaultBodyConfig.Validator,
+		Title:     defaultBodyConfig.Title,
+		Detail:    defaultBodyConfig.Detail,
+		LocalsKey: "form_data",
+	}
 	if defaultGlobalLogger != nil && config.Logger == nil {
 		config.Logger = defaultGlobalLogger
 	}
 	configMutex.RUnlock()
 
-	// Override LocalsKey for form data
-	config.LocalsKey = "form_data"
-
-	return genericValidationMiddleware[T](
+	return genericValidationMiddleware(
 		func(ctx *fiber.Ctx, dto *T) error {
 			// Get form value
-			bodyStr := ctx.FormValue(formFieldName)
+			bodyStr := ctx.FormValue(fieldName)
 			if bodyStr == "" {
-				return fiber.NewError(fiber.StatusBadRequest, "missing form field: "+formFieldName)
+				return fiber.NewError(fiber.StatusBadRequest, "missing form field: "+fieldName)
 			}
 
 			// Unmarshal JSON from form field
