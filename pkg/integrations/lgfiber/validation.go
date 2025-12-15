@@ -550,17 +550,20 @@ func HeadersValidationMiddleware[T any]() fiber.Handler {
 //	    Title: "Invalid Form Data",
 //	})
 //
-//	// In routes: use global config
-//	app.Post("/users", lgfiber.FormDataValidationMiddleware[CreateUserRequest]("json_data"), handler)
+//	// In routes: use global config (defaults to "json_data" field)
+//	app.Post("/users", lgfiber.FormDataValidationMiddleware[CreateUserRequest](""), handler)
+//
+//	// Or with custom field name
+//	app.Post("/users", lgfiber.FormDataValidationMiddleware[CreateUserRequest]("data"), handler)
 //
 //	func handler(c *fiber.Ctx) error {
 //	    body := c.Locals("form_data").(CreateUserRequest)
 //	    // Use validated body...
 //	}
-func FormDataValidationMiddleware[T any](formFieldName *string) fiber.Handler {
+func FormDataValidationMiddleware[T any](formFieldName string) fiber.Handler {
 	fieldName := "json_data"
-	if formFieldName != nil && *formFieldName != "" {
-		fieldName = *formFieldName
+	if formFieldName != "" {
+		fieldName = formFieldName
 	}
 
 	// Capture global config once at middleware creation (not per-request)
