@@ -11,7 +11,7 @@ A high-performance Go logging and error handling library optimized for productio
 - **Fiber Integration**: Drop-in error handler, validation middleware, and Sentry integration
 - **Sentry Integration**: Automatic error reporting with context enrichment and HTTP status filtering (opt-in)
 - **RFC 7807 Compliant**: Problem Details for HTTP APIs standard support
-- **Validation Middleware**: Type-safe request validation with pooled allocations
+- **Validation Middleware**: Type-safe validation for body, query, params, headers, and form data
 - **Thread-Safe**: Concurrent-safe operations with optimized mutex usage
 - **Zero-Allocation Paths**: Lazy initialization and object pooling for hot paths
 
@@ -200,7 +200,9 @@ func main() {
 }
 ```
 
-### Validation Middleware (Type-Safe, Pooled Allocations)
+### Validation Middleware
+
+The library provides type-safe validation middleware with pooled allocations for optimal performance.
 
 **Configure once at startup:**
 
@@ -211,9 +213,21 @@ func main() {
     // Set global logger for all validation middleware
     lgfiber.SetValidationLogger(appLogger)
 
-    // Optional: customize error messages
+    // Optional: customize configs per middleware type
     lgfiber.SetBodyValidationConfig(lgfiber.ValidationConfig{
         Title: "Invalid Request Body",
+    })
+
+    lgfiber.SetQueryValidationConfig(lgfiber.ValidationConfig{
+        Title: "Invalid Query Parameters",
+    })
+
+    lgfiber.SetParamsValidationConfig(lgfiber.ValidationConfig{
+        Title: "Invalid Route Parameters",
+    })
+
+    lgfiber.SetHeadersValidationConfig(lgfiber.ValidationConfig{
+        Title: "Missing Required Headers",
     })
 
     app := fiber.New()
@@ -221,7 +235,7 @@ func main() {
 }
 ```
 
-**Use in routes:**
+#### 1. Body Validation
 
 ```go
 type CreateUserRequest struct {
@@ -230,25 +244,27 @@ type CreateUserRequest struct {
     Age   int    `json:"age" validate:"required,gte=18"`
 }
 
-// Body validation
 app.Post("/users",
     lgfiber.BodyValidationMiddleware[CreateUserRequest](),
     createUserHandler,
 )
 
 func createUserHandler(c *fiber.Ctx) error {
-    // Validated data is in c.Locals
+    // Validated data in c.Locals
     body := c.Locals("body").(CreateUserRequest)
 
-    // Data is guaranteed to be valid
     user := createUser(body)
     return c.JSON(user)
 }
+```
 
-// Query validation
+#### 2. Query Validation
+
+```go
 type SearchQuery struct {
     Query string `query:"q" validate:"required,min=3"`
     Limit int    `query:"limit" validate:"min=1,max=100"`
+    Page  int    `query:"page" validate:"min=1"`
 }
 
 app.Get("/search",
@@ -256,7 +272,17 @@ app.Get("/search",
     searchHandler,
 )
 
-// Params validation
+func searchHandler(c *fiber.Ctx) error {
+    query := c.Locals("query").(SearchQuery)
+
+    results := search(query.Query, query.Limit, query.Page)
+    return c.JSON(results)
+}
+```
+
+#### 3. Params Validation
+
+```go
 type UserParams struct {
     ID string `params:"id" validate:"required,uuid"`
 }
@@ -266,19 +292,82 @@ app.Get("/users/:id",
     getUserHandler,
 )
 
-// Headers validation
+func getUserHandler(c *fiber.Ctx) error {
+    params := c.Locals("params").(UserParams)
+
+    user := getUser(params.ID)
+    return c.JSON(user)
+}
+```
+
+#### 4. Headers Validation
+
+```go
 type RequiredHeaders struct {
     Authorization string `reqheader:"Authorization" validate:"required"`
-    ContentType   string `reqheader:"Content-Type" validate:"required"`
+    ContentType   string `reqheader:"Content-Type" validate:"required,oneof=application/json application/xml"`
 }
 
 app.Post("/api",
     lgfiber.HeadersValidationMiddleware[RequiredHeaders](),
     apiHandler,
 )
+
+func apiHandler(c *fiber.Ctx) error {
+    headers := c.Locals("headers").(RequiredHeaders)
+
+    // Headers are validated and available
+    return c.JSON(fiber.Map{"status": "ok"})
+}
 ```
 
-**Validation error response (RFC 7807):**
+#### 5. Form Data Validation (with JSON field)
+
+For form submissions with embedded JSON data:
+
+```go
+type UploadRequest struct {
+    Title       string   `json:"title" validate:"required,min=3"`
+    Description string   `json:"description" validate:"required"`
+    Tags        []string `json:"tags" validate:"required,min=1"`
+}
+
+// Form field name defaults to "json_data" if empty string
+app.Post("/upload",
+    lgfiber.FormDataValidationMiddleware[UploadRequest]("json_data"),
+    uploadHandler,
+)
+
+// Or use default field name
+app.Post("/upload",
+    lgfiber.FormDataValidationMiddleware[UploadRequest](""),
+    uploadHandler,
+)
+
+func uploadHandler(c *fiber.Ctx) error {
+    // Validated JSON data from form field
+    formData := c.Locals("form_data").(UploadRequest)
+
+    // File from multipart form
+    file, _ := c.FormFile("file")
+
+    return processUpload(formData, file)
+}
+```
+
+**HTML form example:**
+
+```html
+<form action="/upload" method="POST" enctype="multipart/form-data">
+    <input type="file" name="file" />
+    <input type="hidden" name="json_data" value='{"title":"My File","description":"A test file","tags":["test","upload"]}' />
+    <button type="submit">Upload</button>
+</form>
+```
+
+### Validation Error Response (RFC 7807)
+
+All validation middleware returns consistent RFC 7807 compliant responses:
 
 ```json
 {
@@ -298,6 +387,12 @@ app.Post("/api",
   ]
 }
 ```
+
+### Supported Validation Tags
+
+The library uses `go-playground/validator` under the hood.
+
+[Full validator documentation](https://pkg.go.dev/github.com/go-playground/validator/v10)
 
 ### Error Handling in Handlers
 
@@ -340,6 +435,36 @@ func handler(c *fiber.Ctx) error {
 
     return c.JSON(fiber.Map{"status": "processing"})
 }
+```
+
+### Manual Sentry Integration
+
+For custom logging with Sentry:
+
+```go
+import "github.com/aeternitas-infinita/logbundle-go"
+
+// Debug level (info only, not sent to Sentry)
+logbundle.SentryDebug(ctx, logger, "Processing started",
+    slog.String("user_id", userID),
+)
+
+// Info level
+logbundle.SentryInfo(ctx, logger, "User logged in",
+    slog.String("user_id", userID),
+    slog.String("ip", ip),
+)
+
+// Warning level
+logbundle.SentryWarn(ctx, logger, "Deprecated API used", err,
+    slog.String("endpoint", "/old/api"),
+)
+
+// Error level
+logbundle.SentryError(ctx, logger, "Failed to process payment", err,
+    slog.String("payment_id", paymentID),
+    slog.Int("amount", amount),
+)
 ```
 
 ## Sentry Integration
@@ -479,6 +604,7 @@ app.Use(sentryfiber.New(...))          // Too late
 ```
 
 **Why order matters:**
+
 - `sentryfiber.New()` creates the Sentry hub - all other middleware need this
 - `RecoverMiddleware()` must be early to catch panics from subsequent middleware
 - Performance tracking should wrap the entire request lifecycle
@@ -571,6 +697,58 @@ err := lgerr.Unauthorized("invalid credentials",
 )
 ```
 
+## API Reference
+
+### Validation Middleware Functions
+
+| Function | Description | Locals Key |
+|----------|-------------|------------|
+| `BodyValidationMiddleware[T]()` | Validates JSON request body | `"body"` |
+| `QueryValidationMiddleware[T]()` | Validates query parameters | `"query"` |
+| `ParamsValidationMiddleware[T]()` | Validates route parameters | `"params"` |
+| `HeadersValidationMiddleware[T]()` | Validates request headers | `"headers"` |
+| `FormDataValidationMiddleware[T](field)` | Validates form data with JSON field | `"form_data"` |
+
+### Configuration Functions
+
+| Function | Description |
+|----------|-------------|
+| `SetValidationLogger(logger)` | Set global logger for all validation middleware |
+| `SetBodyValidationConfig(config)` | Configure body validation globally |
+| `SetQueryValidationConfig(config)` | Configure query validation globally |
+| `SetParamsValidationConfig(config)` | Configure params validation globally |
+| `SetHeadersValidationConfig(config)` | Configure headers validation globally |
+| `GetValidationLogger()` | Get current global validation logger |
+| `GetBodyValidationConfig()` | Get current body validation config |
+| `ResetValidationConfigs()` | Reset all configs to defaults |
+
+### Error Handler Functions
+
+| Function | Description |
+|----------|-------------|
+| `ErrorHandler(c, err)` | Main Fiber error handler |
+| `HandleError(ctx, lgErr)` | Manual error handling (no Fiber context) |
+| `HandleErrorWithFiber(c, lgErr)` | Manual error handling with Fiber context |
+| `RecoverGoroutinePanic(ctx, name)` | Panic recovery for goroutines |
+
+### Sentry Middleware Functions
+
+| Function | Description |
+|----------|-------------|
+| `BreadcrumbsMiddleware()` | Adds HTTP breadcrumbs |
+| `ContextEnrichmentMiddleware()` | Enriches Sentry context |
+| `PerformanceMiddleware()` | Creates performance transactions |
+| `RecoverMiddleware()` | Catches panics |
+
+### Sentry Helper Functions
+
+| Function | Description |
+|----------|-------------|
+| `SetTag(c, key, value)` | Set Sentry tag |
+| `SetContext(c, key, data)` | Set Sentry context |
+| `AddBreadcrumb(c, category, msg, level, data)` | Add custom breadcrumb |
+| `StartSpan(c, operation, description)` | Start performance span |
+
 ## Thread Safety
 
 - All error operations are safe for concurrent use after creation
@@ -589,14 +767,17 @@ err := lgerr.Unauthorized("invalid credentials",
 ## Performance Benchmarks
 
 **Validation Middleware:**
+
 - 40-60% allocation reduction vs pre-pooling (sync.Pool for validation errors)
 - 30-40% faster middleware creation (init() vs lazy initDefaultConfigs())
 
 **Error Creation:**
+
 - Factory functions: 3x fewer allocations vs builder pattern with options slices
 - Lazy context maps: ~150 bytes saved per error when context unused
 
 **Sentry Integration:**
+
 - Zero-allocation when disabled (early returns)
 - Lazy map initialization: 100% reduction when extraData is empty
 

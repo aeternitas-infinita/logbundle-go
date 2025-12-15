@@ -1,6 +1,7 @@
 package lgfiber
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -528,6 +529,65 @@ func HeadersValidationMiddleware[T any]() fiber.Handler {
 
 	return genericValidationMiddleware[T](
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.ReqHeaderParser(dto) },
+		config,
+	)
+}
+
+// FormDataValidationMiddleware creates a middleware that validates form data with JSON in a specific field
+// Expects form data with a field containing JSON that will be validated
+// Uses the global body validation config set via SetBodyValidationConfig()
+//
+// Usage:
+//
+//	type CreateUserRequest struct {
+//	    Email string `json:"email" validate:"required,email"`
+//	    Name  string `json:"name" validate:"required,min=2,max=100"`
+//	}
+//
+//	// At startup: configure globally
+//	lgfiber.SetValidationLogger(appLogger)
+//	lgfiber.SetBodyValidationConfig(lgfiber.ValidationConfig{
+//	    Title: "Invalid Form Data",
+//	})
+//
+//	// In routes: use global config
+//	app.Post("/users", lgfiber.FormDataValidationMiddleware[CreateUserRequest]("json_data"), handler)
+//
+//	func handler(c *fiber.Ctx) error {
+//	    body := c.Locals("form_data").(CreateUserRequest)
+//	    // Use validated body...
+//	}
+func FormDataValidationMiddleware[T any](formFieldName string) fiber.Handler {
+	if formFieldName == "" {
+		formFieldName = "json_data"
+	}
+
+	// Capture global config once at middleware creation (not per-request)
+	configMutex.RLock()
+	config := defaultBodyConfig
+	if defaultGlobalLogger != nil && config.Logger == nil {
+		config.Logger = defaultGlobalLogger
+	}
+	configMutex.RUnlock()
+
+	// Override LocalsKey for form data
+	config.LocalsKey = "form_data"
+
+	return genericValidationMiddleware[T](
+		func(ctx *fiber.Ctx, dto *T) error {
+			// Get form value
+			bodyStr := ctx.FormValue(formFieldName)
+			if bodyStr == "" {
+				return fiber.NewError(fiber.StatusBadRequest, "missing form field: "+formFieldName)
+			}
+
+			// Unmarshal JSON from form field
+			if err := json.Unmarshal([]byte(bodyStr), dto); err != nil {
+				return fiber.NewError(fiber.StatusBadRequest, "invalid JSON in form field: "+err.Error())
+			}
+
+			return nil
+		},
 		config,
 	)
 }
