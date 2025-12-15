@@ -93,8 +93,12 @@ func CaptureEvent(ctx context.Context, level sentry.Level, msg string, err error
 }
 
 func parseExtraData(extraData []any) (map[string]string, map[string]any) {
-	tags := make(map[string]string)
-	extra := make(map[string]any)
+	if len(extraData) == 0 {
+		return nil, nil
+	}
+
+	var tags map[string]string
+	var extra map[string]any
 
 	const maxTagLength = 100
 
@@ -109,6 +113,9 @@ func parseExtraData(extraData []any) (map[string]string, map[string]any) {
 
 			if strVal, ok := value.(string); ok {
 				if len(strVal) < maxTagLength && !strings.Contains(strVal, "\n") {
+					if tags == nil {
+						tags = make(map[string]string)
+					}
 					tags[key] = strVal
 					continue
 				}
@@ -116,14 +123,29 @@ func parseExtraData(extraData []any) (map[string]string, map[string]any) {
 
 			switch v := value.(type) {
 			case int:
+				if tags == nil {
+					tags = make(map[string]string)
+				}
 				tags[key] = fmt.Sprintf("%d", v)
 			case int64:
+				if tags == nil {
+					tags = make(map[string]string)
+				}
 				tags[key] = fmt.Sprintf("%d", v)
 			case float64:
+				if tags == nil {
+					tags = make(map[string]string)
+				}
 				tags[key] = fmt.Sprintf("%f", v)
 			case bool:
+				if tags == nil {
+					tags = make(map[string]string)
+				}
 				tags[key] = fmt.Sprintf("%t", v)
 			default:
+				if extra == nil {
+					extra = make(map[string]any)
+				}
 				extra[key] = value
 			}
 		}

@@ -191,7 +191,7 @@ func New(message string) *Error {
 		file:       file,
 		line:       line,
 		stackTrace: pcs[:n:n], // Use slice expression to prevent unwanted mutations
-		context:    make(map[string]any),
+		context:    nil,        // Lazy-initialized on first use
 	}
 }
 

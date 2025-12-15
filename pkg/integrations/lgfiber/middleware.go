@@ -110,9 +110,9 @@ func ContextEnrichmentMiddleware() fiber.Handler {
 			"hostname":     c.Hostname(),
 		})
 
-		// Add query params if present
-		if queries := c.Queries(); len(queries) > 0 {
-			// Pre-allocate map with known size
+		// Add query params if present (avoid intermediate map allocation)
+		queries := c.Queries()
+		if len(queries) > 0 {
 			queryParams := make(map[string]any, len(queries))
 			for k, v := range queries {
 				queryParams[k] = v
@@ -120,9 +120,9 @@ func ContextEnrichmentMiddleware() fiber.Handler {
 			hub.Scope().SetContext("query_params", queryParams)
 		}
 
-		// Add route params if present
-		if params := c.AllParams(); len(params) > 0 {
-			// Pre-allocate map with known size
+		// Add route params if present (avoid intermediate map allocation)
+		params := c.AllParams()
+		if len(params) > 0 {
 			routeParams := make(map[string]any, len(params))
 			for k, v := range params {
 				routeParams[k] = v

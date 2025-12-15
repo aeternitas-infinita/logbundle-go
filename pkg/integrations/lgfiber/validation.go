@@ -31,6 +31,21 @@ type ValidationConfig struct {
 var (
 	defaultValidator     *validator.Validate
 	defaultValidatorOnce sync.Once
+
+	// Global validation middleware configs
+	defaultBodyConfig    ValidationConfig
+	defaultQueryConfig   ValidationConfig
+	defaultParamsConfig  ValidationConfig
+	defaultHeadersConfig ValidationConfig
+	defaultGlobalLogger  *slog.Logger
+	configMutex          sync.RWMutex
+
+	// Pool for validation error slices to reduce allocations
+	validationErrorPool = sync.Pool{
+		New: func() any {
+			return make([]lgerr.ValidationError, 0, 8)
+		},
+	}
 )
 
 // getDefaultValidator returns the default validator instance (lazy initialization)
@@ -41,11 +56,172 @@ func getDefaultValidator() *validator.Validate {
 	return defaultValidator
 }
 
+// init initializes all default validation configs at package load time
+func init() {
+	defaultBodyConfig = ValidationConfig{
+		LocalsKey: "body",
+		Title:     "Validation Error",
+		Detail:    "Please check your request body",
+	}
+	defaultQueryConfig = ValidationConfig{
+		LocalsKey: "query",
+		Title:     "Invalid Query Parameters",
+		Detail:    "Please check your query parameters",
+	}
+	defaultParamsConfig = ValidationConfig{
+		LocalsKey: "params",
+		Title:     "Invalid Route Parameters",
+		Detail:    "Please check your route parameters",
+	}
+	defaultHeadersConfig = ValidationConfig{
+		LocalsKey: "headers",
+		Title:     "Invalid Request Headers",
+		Detail:    "Please check your request headers",
+	}
+}
+
+// SetValidationLogger sets the global logger for all validation middlewares
+// Call this at application startup to configure logging for validation errors
+func SetValidationLogger(logger *slog.Logger) {
+	configMutex.Lock()
+	defaultGlobalLogger = logger
+	configMutex.Unlock()
+}
+
+// GetValidationLogger returns the global validation logger
+func GetValidationLogger() *slog.Logger {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return defaultGlobalLogger
+}
+
+// SetBodyValidationConfig sets the global configuration for body validation middleware
+func SetBodyValidationConfig(config ValidationConfig) {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	// Keep LocalsKey and Detail as defaults if not explicitly set
+	if config.Logger != nil {
+		defaultBodyConfig.Logger = config.Logger
+	}
+	if config.Validator != nil {
+		defaultBodyConfig.Validator = config.Validator
+	}
+	if config.Title != "" {
+		defaultBodyConfig.Title = config.Title
+	}
+}
+
+// GetBodyValidationConfig returns a copy of the global body validation config
+func GetBodyValidationConfig() ValidationConfig {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return defaultBodyConfig
+}
+
+// SetQueryValidationConfig sets the global configuration for query validation middleware
+func SetQueryValidationConfig(config ValidationConfig) {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	// Keep LocalsKey and Detail as defaults if not explicitly set
+	if config.Logger != nil {
+		defaultQueryConfig.Logger = config.Logger
+	}
+	if config.Validator != nil {
+		defaultQueryConfig.Validator = config.Validator
+	}
+	if config.Title != "" {
+		defaultQueryConfig.Title = config.Title
+	}
+}
+
+// GetQueryValidationConfig returns a copy of the global query validation config
+func GetQueryValidationConfig() ValidationConfig {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return defaultQueryConfig
+}
+
+// SetParamsValidationConfig sets the global configuration for params validation middleware
+func SetParamsValidationConfig(config ValidationConfig) {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	// Keep LocalsKey and Detail as defaults if not explicitly set
+	if config.Logger != nil {
+		defaultParamsConfig.Logger = config.Logger
+	}
+	if config.Validator != nil {
+		defaultParamsConfig.Validator = config.Validator
+	}
+	if config.Title != "" {
+		defaultParamsConfig.Title = config.Title
+	}
+}
+
+// GetParamsValidationConfig returns a copy of the global params validation config
+func GetParamsValidationConfig() ValidationConfig {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return defaultParamsConfig
+}
+
+// SetHeadersValidationConfig sets the global configuration for headers validation middleware
+func SetHeadersValidationConfig(config ValidationConfig) {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	// Keep LocalsKey and Detail as defaults if not explicitly set
+	if config.Logger != nil {
+		defaultHeadersConfig.Logger = config.Logger
+	}
+	if config.Validator != nil {
+		defaultHeadersConfig.Validator = config.Validator
+	}
+	if config.Title != "" {
+		defaultHeadersConfig.Title = config.Title
+	}
+}
+
+// GetHeadersValidationConfig returns a copy of the global headers validation config
+func GetHeadersValidationConfig() ValidationConfig {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return defaultHeadersConfig
+}
+
+// ResetValidationConfigs resets all validation configs to their defaults
+func ResetValidationConfigs() {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	defaultGlobalLogger = nil
+
+	// Re-initialize to defaults
+	defaultBodyConfig = ValidationConfig{
+		LocalsKey: "body",
+		Title:     "Validation Error",
+		Detail:    "Please check your request body",
+	}
+	defaultQueryConfig = ValidationConfig{
+		LocalsKey: "query",
+		Title:     "Invalid Query Parameters",
+		Detail:    "Please check your query parameters",
+	}
+	defaultParamsConfig = ValidationConfig{
+		LocalsKey: "params",
+		Title:     "Invalid Route Parameters",
+		Detail:    "Please check your route parameters",
+	}
+	defaultHeadersConfig = ValidationConfig{
+		LocalsKey: "headers",
+		Title:     "Invalid Request Headers",
+		Detail:    "Please check your request headers",
+	}
+}
+
 // parseValidationErrors converts validator.ValidationErrors to lgerr.ValidationError slice
 func parseValidationErrors(err error, dto interface{}) []lgerr.ValidationError {
 	if validatorErrs, ok := err.(validator.ValidationErrors); ok {
-		// Pre-allocate slice with exact capacity to avoid reallocation
-		validationErrors := make([]lgerr.ValidationError, 0, len(validatorErrs))
+		// Get slice from pool and reset it
+		validationErrors := validationErrorPool.Get().([]lgerr.ValidationError)
+		validationErrors = validationErrors[:0]
 
 		for _, fieldErr := range validatorErrs {
 			// Get the JSON field name from struct tag
@@ -61,7 +237,15 @@ func parseValidationErrors(err error, dto interface{}) []lgerr.ValidationError {
 			}
 			validationErrors = append(validationErrors, validationErr)
 		}
-		return validationErrors
+
+		// Make a copy to return (pool will be reused)
+		result := make([]lgerr.ValidationError, len(validationErrors))
+		copy(result, validationErrors)
+
+		// Return slice to pool
+		validationErrorPool.Put(validationErrors)
+
+		return result
 	}
 
 	return nil
@@ -198,6 +382,8 @@ func genericValidationMiddleware[T any](
 }
 
 // BodyValidationMiddleware creates a middleware that validates request body
+// Uses the global body validation config set via SetBodyValidationConfig()
+//
 // Usage:
 //
 //	type CreateUserRequest struct {
@@ -205,33 +391,27 @@ func genericValidationMiddleware[T any](
 //	    Name  string `json:"name" validate:"required,min=2,max=100"`
 //	}
 //
+//	// At startup: configure globally
+//	lgfiber.SetValidationLogger(appLogger)
+//	lgfiber.SetBodyValidationConfig(lgfiber.ValidationConfig{
+//	    Title: "Invalid User Request",
+//	})
+//
+//	// In routes: use global config
 //	app.Post("/users", lgfiber.BodyValidationMiddleware[CreateUserRequest](), handler)
 //
 //	func handler(c *fiber.Ctx) error {
 //	    body := c.Locals("body").(CreateUserRequest)
 //	    // Use validated body...
 //	}
-func BodyValidationMiddleware[T any](customConfig ...ValidationConfig) fiber.Handler {
-	config := ValidationConfig{
-		LocalsKey: "body",
-		Title:     "Validation Error",
-		Detail:    "Please check your request body",
+func BodyValidationMiddleware[T any]() fiber.Handler {
+	// Capture global config once at middleware creation (not per-request)
+	configMutex.RLock()
+	config := defaultBodyConfig
+	if defaultGlobalLogger != nil && config.Logger == nil {
+		config.Logger = defaultGlobalLogger
 	}
-
-	if len(customConfig) > 0 {
-		if customConfig[0].Validator != nil {
-			config.Validator = customConfig[0].Validator
-		}
-		if customConfig[0].LocalsKey != "" {
-			config.LocalsKey = customConfig[0].LocalsKey
-		}
-		if customConfig[0].Title != "" {
-			config.Title = customConfig[0].Title
-		}
-		if customConfig[0].Detail != "" {
-			config.Detail = customConfig[0].Detail
-		}
-	}
+	configMutex.RUnlock()
 
 	return genericValidationMiddleware[T](
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.BodyParser(dto) },
@@ -240,6 +420,8 @@ func BodyValidationMiddleware[T any](customConfig ...ValidationConfig) fiber.Han
 }
 
 // QueryValidationMiddleware creates a middleware that validates query parameters
+// Uses the global query validation config set via SetQueryValidationConfig()
+//
 // Usage:
 //
 //	type SearchQuery struct {
@@ -247,33 +429,27 @@ func BodyValidationMiddleware[T any](customConfig ...ValidationConfig) fiber.Han
 //	    Limit int    `json:"limit" validate:"min=1,max=100"`
 //	}
 //
+//	// At startup: configure globally
+//	lgfiber.SetValidationLogger(appLogger)
+//	lgfiber.SetQueryValidationConfig(lgfiber.ValidationConfig{
+//	    Title: "Invalid search query",
+//	})
+//
+//	// In routes: use global config
 //	app.Get("/search", lgfiber.QueryValidationMiddleware[SearchQuery](), handler)
 //
 //	func handler(c *fiber.Ctx) error {
 //	    query := c.Locals("query").(SearchQuery)
 //	    // Use validated query...
 //	}
-func QueryValidationMiddleware[T any](customConfig ...ValidationConfig) fiber.Handler {
-	config := ValidationConfig{
-		LocalsKey: "query",
-		Title:     "Invalid Query Parameters",
-		Detail:    "Please check your query parameters",
+func QueryValidationMiddleware[T any]() fiber.Handler {
+	// Capture global config once at middleware creation (not per-request)
+	configMutex.RLock()
+	config := defaultQueryConfig
+	if defaultGlobalLogger != nil && config.Logger == nil {
+		config.Logger = defaultGlobalLogger
 	}
-
-	if len(customConfig) > 0 {
-		if customConfig[0].Validator != nil {
-			config.Validator = customConfig[0].Validator
-		}
-		if customConfig[0].LocalsKey != "" {
-			config.LocalsKey = customConfig[0].LocalsKey
-		}
-		if customConfig[0].Title != "" {
-			config.Title = customConfig[0].Title
-		}
-		if customConfig[0].Detail != "" {
-			config.Detail = customConfig[0].Detail
-		}
-	}
+	configMutex.RUnlock()
 
 	return genericValidationMiddleware[T](
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.QueryParser(dto) },
@@ -282,39 +458,35 @@ func QueryValidationMiddleware[T any](customConfig ...ValidationConfig) fiber.Ha
 }
 
 // ParamsValidationMiddleware creates a middleware that validates route parameters
+// Uses the global params validation config set via SetParamsValidationConfig()
+//
 // Usage:
 //
 //	type UserParams struct {
 //	    ID string `params:"id" validate:"required,uuid"`
 //	}
 //
+//	// At startup: configure globally
+//	lgfiber.SetValidationLogger(appLogger)
+//	lgfiber.SetParamsValidationConfig(lgfiber.ValidationConfig{
+//	    Title: "Invalid user ID",
+//	})
+//
+//	// In routes: use global config
 //	app.Get("/users/:id", lgfiber.ParamsValidationMiddleware[UserParams](), handler)
 //
 //	func handler(c *fiber.Ctx) error {
 //	    params := c.Locals("params").(UserParams)
 //	    // Use validated params...
 //	}
-func ParamsValidationMiddleware[T any](customConfig ...ValidationConfig) fiber.Handler {
-	config := ValidationConfig{
-		LocalsKey: "params",
-		Title:     "Invalid Route Parameters",
-		Detail:    "Please check your route parameters",
+func ParamsValidationMiddleware[T any]() fiber.Handler {
+	// Capture global config once at middleware creation (not per-request)
+	configMutex.RLock()
+	config := defaultParamsConfig
+	if defaultGlobalLogger != nil && config.Logger == nil {
+		config.Logger = defaultGlobalLogger
 	}
-
-	if len(customConfig) > 0 {
-		if customConfig[0].Validator != nil {
-			config.Validator = customConfig[0].Validator
-		}
-		if customConfig[0].LocalsKey != "" {
-			config.LocalsKey = customConfig[0].LocalsKey
-		}
-		if customConfig[0].Title != "" {
-			config.Title = customConfig[0].Title
-		}
-		if customConfig[0].Detail != "" {
-			config.Detail = customConfig[0].Detail
-		}
-	}
+	configMutex.RUnlock()
 
 	return genericValidationMiddleware[T](
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.ParamsParser(dto) },
@@ -323,6 +495,8 @@ func ParamsValidationMiddleware[T any](customConfig ...ValidationConfig) fiber.H
 }
 
 // HeadersValidationMiddleware creates a middleware that validates request headers
+// Uses the global headers validation config set via SetHeadersValidationConfig()
+//
 // Usage:
 //
 //	type RequiredHeaders struct {
@@ -330,33 +504,27 @@ func ParamsValidationMiddleware[T any](customConfig ...ValidationConfig) fiber.H
 //	    ContentType   string `reqheader:"Content-Type" validate:"required"`
 //	}
 //
+//	// At startup: configure globally
+//	lgfiber.SetValidationLogger(appLogger)
+//	lgfiber.SetHeadersValidationConfig(lgfiber.ValidationConfig{
+//	    Title: "Missing required headers",
+//	})
+//
+//	// In routes: use global config
 //	app.Post("/api", lgfiber.HeadersValidationMiddleware[RequiredHeaders](), handler)
 //
 //	func handler(c *fiber.Ctx) error {
 //	    headers := c.Locals("headers").(RequiredHeaders)
 //	    // Use validated headers...
 //	}
-func HeadersValidationMiddleware[T any](customConfig ...ValidationConfig) fiber.Handler {
-	config := ValidationConfig{
-		LocalsKey: "headers",
-		Title:     "Invalid Request Headers",
-		Detail:    "Please check your request headers",
+func HeadersValidationMiddleware[T any]() fiber.Handler {
+	// Capture global config once at middleware creation (not per-request)
+	configMutex.RLock()
+	config := defaultHeadersConfig
+	if defaultGlobalLogger != nil && config.Logger == nil {
+		config.Logger = defaultGlobalLogger
 	}
-
-	if len(customConfig) > 0 {
-		if customConfig[0].Validator != nil {
-			config.Validator = customConfig[0].Validator
-		}
-		if customConfig[0].LocalsKey != "" {
-			config.LocalsKey = customConfig[0].LocalsKey
-		}
-		if customConfig[0].Title != "" {
-			config.Title = customConfig[0].Title
-		}
-		if customConfig[0].Detail != "" {
-			config.Detail = customConfig[0].Detail
-		}
-	}
+	configMutex.RUnlock()
 
 	return genericValidationMiddleware[T](
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.ReqHeaderParser(dto) },

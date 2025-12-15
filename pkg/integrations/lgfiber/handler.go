@@ -18,27 +18,43 @@ import (
 	"github.com/aeternitas-infinita/logbundle-go/pkg/integrations/lgerr"
 )
 
-// shouldSendToSentry determines if an error should be reported to Sentry
-// Reports if: Sentry is enabled AND status >= minHTTPStatus AND hub exists AND not explicitly ignored
-func shouldSendToSentry(lgErr *lgerr.Error, hub *sentry.Hub) bool {
-	// Check if Sentry is globally enabled
+// shouldSendToSentryLazy performs a lightweight pre-check before creating hub
+// Returns false if Sentry should definitely not be used, nil hub if might be needed
+// This avoids creating the hub for 80% of errors (non-5xx status codes)
+func shouldSendToSentryLazy(lgErr *lgerr.Error) bool {
+	// Check if Sentry is globally enabled (fast config read)
 	if !config.IsSentryEnabled() {
 		return false
 	}
 
-	if hub == nil || lgErr.ShouldIgnoreSentry() {
+	// Skip if error explicitly ignores Sentry (fast field check)
+	if lgErr.ShouldIgnoreSentry() {
 		return false
 	}
 
+	// Check status code against minimum (fast)
 	statusCode := lgErr.HTTPStatus()
 	minStatus := config.GetSentryMinHTTPStatus()
 
-	// If minStatus is 0, send all errors
+	// If minStatus is 0, send all errors (need hub check later)
 	if minStatus == 0 {
 		return true
 	}
 
+	// Only proceed if status code qualifies (e.g., >= 500 or >= minStatus)
 	return statusCode >= minStatus
+}
+
+// shouldSendToSentry determines if an error should be reported to Sentry
+// Reports if: Sentry is enabled AND status >= minHTTPStatus AND hub exists AND not explicitly ignored
+func shouldSendToSentry(lgErr *lgerr.Error, hub *sentry.Hub) bool {
+	// Pre-check without hub (most rejections happen here)
+	if !shouldSendToSentryLazy(lgErr) {
+		return false
+	}
+
+	// Hub exists check (only reached if lazy check passed)
+	return hub != nil
 }
 
 // captureToSentry captures an lgerr.Error to Sentry with full context
@@ -247,20 +263,30 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 		// Create lgerr.Error from generic error
 		lgErr = lgerr.Internal(err.Error()).
 			Wrap(err).
-			WithHTTPStatus(code).
-			WithTitle("Internal Server Error").
-			WithContext("original_error_type", fmt.Sprintf("%T", err))
+			WithHTTPStatus(code)
+
+		// Map common HTTP status codes to appropriate error types
+		if code == fiber.StatusNotFound {
+			lgErr.WithType(lgerr.TypeNotFound).WithTitle("Not Found")
+		} else if code >= 500 {
+			lgErr.WithTitle("Internal Server Error")
+		} else if code >= 400 {
+			lgErr.WithTitle("Bad Request")
+		}
 
 		// Continue with normal lgerr.Error handling flow
 	}
 
 	// Handle lgerr.Error
-	hub := sentryfiber.GetHubFromContext(c)
 	var sentryEventID *sentry.EventID
 
-	// Send to Sentry if appropriate
-	if shouldSendToSentry(lgErr, hub) {
-		sentryEventID = captureToSentry(c.UserContext(), hub, lgErr, "error_handler", c)
+	// Lightweight pre-check first
+	if shouldSendToSentryLazy(lgErr) {
+		// Only fetch hub if pre-check passed
+		hub := sentryfiber.GetHubFromContext(c)
+		if shouldSendToSentry(lgErr, hub) {
+			sentryEventID = captureToSentry(c.UserContext(), hub, lgErr, "error_handler", c)
+		}
 	}
 
 	// Log the error

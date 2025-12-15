@@ -16,113 +16,148 @@ func NotFound(resource string, id any) *Error {
 
 // Validation creates a validation error
 func Validation(message string, opts ...ErrorOption) *Error {
-	options := []ErrorOption{
-		WithMessage(message),
-		WithType(TypeValidation),
-		WithTitle("Validation Error"),
+	err := New(message)
+	err.errorType = TypeValidation
+	err.title = "Validation Error"
+
+	for _, opt := range opts {
+		opt(err)
 	}
-	return NewWithOptions(append(options, opts...)...)
+	return err
 }
 
 // Database creates a database error
 func Database(message string, opts ...ErrorOption) *Error {
-	options := []ErrorOption{
-		WithMessage(message),
-		WithType(TypeDatabase),
-		WithTitle("Database Error"),
+	err := New(message)
+	err.errorType = TypeDatabase
+	err.title = "Database Error"
+
+	for _, opt := range opts {
+		opt(err)
 	}
-	return NewWithOptions(append(options, opts...)...)
+	return err
 }
 
 // Internal creates an internal server error
 func Internal(message string, opts ...ErrorOption) *Error {
-	options := []ErrorOption{
-		WithMessage(message),
-		WithType(TypeInternal),
-		WithTitle("Internal Server Error"),
+	err := New(message)
+	err.errorType = TypeInternal
+	err.title = "Internal Server Error"
+
+	for _, opt := range opts {
+		opt(err)
 	}
-	return NewWithOptions(append(options, opts...)...)
+	return err
 }
 
 // Forbidden creates a forbidden access error
 func Forbidden(resource string, reason string, opts ...ErrorOption) *Error {
-	options := []ErrorOption{
-		WithMessage(fmt.Sprintf("access forbidden: %s", reason)),
-		WithType(TypeForbidden),
-		WithContextKV("resource", resource),
-		WithContextKV("reason", reason),
-		WithTitle("Access Forbidden"),
-		WithDetail(reason),
+	err := New(fmt.Sprintf("access forbidden: %s", reason))
+	err.errorType = TypeForbidden
+	err.title = "Access Forbidden"
+	err.detail = reason
+	if err.context == nil {
+		err.context = make(map[string]any, 2)
 	}
-	return NewWithOptions(append(options, opts...)...)
+	err.context["resource"] = resource
+	err.context["reason"] = reason
+
+	for _, opt := range opts {
+		opt(err)
+	}
+	return err
 }
 
 // Unauthorized creates an unauthorized error
 func Unauthorized(reason string, opts ...ErrorOption) *Error {
-	options := []ErrorOption{
-		WithMessage(fmt.Sprintf("unauthorized: %s", reason)),
-		WithType(TypeUnauth),
-		WithContextKV("reason", reason),
-		WithTitle("Unauthorized"),
-		WithDetail(reason),
+	err := New(fmt.Sprintf("unauthorized: %s", reason))
+	err.errorType = TypeUnauth
+	err.title = "Unauthorized"
+	err.detail = reason
+	if err.context == nil {
+		err.context = make(map[string]any, 1)
 	}
-	return NewWithOptions(append(options, opts...)...)
+	err.context["reason"] = reason
+
+	for _, opt := range opts {
+		opt(err)
+	}
+	return err
 }
 
 // BadInput creates a bad input error
 func BadInput(message string, opts ...ErrorOption) *Error {
-	options := []ErrorOption{
-		WithMessage(message),
-		WithType(TypeBadInput),
-		WithTitle("Bad Request"),
+	err := New(message)
+	err.errorType = TypeBadInput
+	err.title = "Bad Request"
+
+	for _, opt := range opts {
+		opt(err)
 	}
-	return NewWithOptions(append(options, opts...)...)
+	return err
 }
 
 // Conflict creates a resource conflict error
 func Conflict(resource string, reason string, opts ...ErrorOption) *Error {
-	options := []ErrorOption{
-		WithMessage(fmt.Sprintf("%s conflict: %s", resource, reason)),
-		WithType(TypeConflict),
-		WithContextKV("resource", resource),
-		WithContextKV("reason", reason),
-		WithTitle("Resource Conflict"),
-		WithDetail(reason),
+	err := New(fmt.Sprintf("%s conflict: %s", resource, reason))
+	err.errorType = TypeConflict
+	err.title = "Resource Conflict"
+	err.detail = reason
+	if err.context == nil {
+		err.context = make(map[string]any, 2)
 	}
-	return NewWithOptions(append(options, opts...)...)
+	err.context["resource"] = resource
+	err.context["reason"] = reason
+
+	for _, opt := range opts {
+		opt(err)
+	}
+	return err
 }
 
 // External creates an external service error
 func External(service string, message string, opts ...ErrorOption) *Error {
-	options := []ErrorOption{
-		WithMessage(fmt.Sprintf("external service error: %s - %s", service, message)),
-		WithType(TypeExternal),
-		WithContextKV("service", service),
-		WithTitle("External Service Error"),
-		WithDetail(message),
+	err := New(fmt.Sprintf("external service error: %s - %s", service, message))
+	err.errorType = TypeExternal
+	err.title = "External Service Error"
+	err.detail = message
+	if err.context == nil {
+		err.context = make(map[string]any, 1)
 	}
-	return NewWithOptions(append(options, opts...)...)
+	err.context["service"] = service
+
+	for _, opt := range opts {
+		opt(err)
+	}
+	return err
 }
 
 // Timeout creates a timeout error
 func Timeout(operation string, duration string, opts ...ErrorOption) *Error {
-	options := []ErrorOption{
-		WithMessage(fmt.Sprintf("timeout: %s exceeded %s", operation, duration)),
-		WithType(TypeTimeout),
-		WithContextKV("operation", operation),
-		WithContextKV("duration", duration),
-		WithTitle("Request Timeout"),
-		WithDetail(fmt.Sprintf("Operation %s exceeded timeout of %s", operation, duration)),
+	err := New(fmt.Sprintf("timeout: %s exceeded %s", operation, duration))
+	err.errorType = TypeTimeout
+	err.title = "Request Timeout"
+	err.detail = fmt.Sprintf("Operation %s exceeded timeout of %s", operation, duration)
+	if err.context == nil {
+		err.context = make(map[string]any, 2)
 	}
-	return NewWithOptions(append(options, opts...)...)
+	err.context["operation"] = operation
+	err.context["duration"] = duration
+
+	for _, opt := range opts {
+		opt(err)
+	}
+	return err
 }
 
 // Busy creates a service busy/unavailable error
 func Busy(message string, opts ...ErrorOption) *Error {
-	options := []ErrorOption{
-		WithMessage(message),
-		WithType(TypeBusy),
-		WithTitle("Service Unavailable"),
+	err := New(message)
+	err.errorType = TypeBusy
+	err.title = "Service Unavailable"
+
+	for _, opt := range opts {
+		opt(err)
 	}
-	return NewWithOptions(append(options, opts...)...)
+	return err
 }
