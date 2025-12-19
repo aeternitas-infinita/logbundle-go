@@ -2,19 +2,17 @@ package lgerr
 
 import "fmt"
 
-// NotFound creates a "not found" error with resource context
 func NotFound(resource string, id any) *Error {
 	return NewWithOptions(
 		WithMessage(fmt.Sprintf("%s not found", resource)),
 		WithType(TypeNotFound),
-		WithContextKV("resource", resource),
-		WithContextKV("resource_id", id),
+		WithContext("resource", resource),
+		WithContext("resource_id", id),
 		WithTitle("Resource Not Found"),
 		WithDetail(fmt.Sprintf("The requested %s does not exist", resource)),
 	)
 }
 
-// Validation creates a validation error
 func Validation(message string, opts ...ErrorOption) *Error {
 	err := New(message)
 	err.errorType = TypeValidation
@@ -26,7 +24,6 @@ func Validation(message string, opts ...ErrorOption) *Error {
 	return err
 }
 
-// Database creates a database error
 func Database(message string, opts ...ErrorOption) *Error {
 	err := New(message)
 	err.errorType = TypeDatabase
@@ -38,7 +35,6 @@ func Database(message string, opts ...ErrorOption) *Error {
 	return err
 }
 
-// Internal creates an internal server error
 func Internal(message string, opts ...ErrorOption) *Error {
 	err := New(message)
 	err.errorType = TypeInternal
@@ -50,7 +46,6 @@ func Internal(message string, opts ...ErrorOption) *Error {
 	return err
 }
 
-// Forbidden creates a forbidden access error
 func Forbidden(resource string, reason string, opts ...ErrorOption) *Error {
 	err := New(fmt.Sprintf("access forbidden: %s", reason))
 	err.errorType = TypeForbidden
@@ -68,7 +63,6 @@ func Forbidden(resource string, reason string, opts ...ErrorOption) *Error {
 	return err
 }
 
-// Unauthorized creates an unauthorized error
 func Unauthorized(reason string, opts ...ErrorOption) *Error {
 	err := New(fmt.Sprintf("unauthorized: %s", reason))
 	err.errorType = TypeUnauth
@@ -85,7 +79,6 @@ func Unauthorized(reason string, opts ...ErrorOption) *Error {
 	return err
 }
 
-// BadInput creates a bad input error
 func BadInput(message string, opts ...ErrorOption) *Error {
 	err := New(message)
 	err.errorType = TypeBadInput
@@ -97,7 +90,6 @@ func BadInput(message string, opts ...ErrorOption) *Error {
 	return err
 }
 
-// Conflict creates a resource conflict error
 func Conflict(resource string, reason string, opts ...ErrorOption) *Error {
 	err := New(fmt.Sprintf("%s conflict: %s", resource, reason))
 	err.errorType = TypeConflict
@@ -115,7 +107,6 @@ func Conflict(resource string, reason string, opts ...ErrorOption) *Error {
 	return err
 }
 
-// External creates an external service error
 func External(service string, message string, opts ...ErrorOption) *Error {
 	err := New(fmt.Sprintf("external service error: %s - %s", service, message))
 	err.errorType = TypeExternal
@@ -132,7 +123,6 @@ func External(service string, message string, opts ...ErrorOption) *Error {
 	return err
 }
 
-// Timeout creates a timeout error
 func Timeout(operation string, duration string, opts ...ErrorOption) *Error {
 	err := New(fmt.Sprintf("timeout: %s exceeded %s", operation, duration))
 	err.errorType = TypeTimeout
@@ -150,7 +140,6 @@ func Timeout(operation string, duration string, opts ...ErrorOption) *Error {
 	return err
 }
 
-// Busy creates a service busy/unavailable error
 func Busy(message string, opts ...ErrorOption) *Error {
 	err := New(message)
 	err.errorType = TypeBusy

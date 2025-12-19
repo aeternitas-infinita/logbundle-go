@@ -11,14 +11,9 @@ import (
 
 	"github.com/aeternitas-infinita/logbundle-go/pkg/config"
 	"github.com/aeternitas-infinita/logbundle-go/pkg/handler"
+	"github.com/aeternitas-infinita/logbundle-go/pkg/integrations/lgerr"
 )
 
-// userIDProvider interface for extracting user ID from context locals
-type userIDProvider interface {
-	GetUserID() string
-}
-
-// BreadcrumbsMiddleware adds HTTP request breadcrumbs to Sentry
 func BreadcrumbsMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		// Skip breadcrumbs if Sentry disabled to avoid allocations
@@ -79,123 +74,30 @@ func BreadcrumbsMiddleware() fiber.Handler {
 	}
 }
 
-// ContextEnrichmentMiddleware enriches Sentry context with request data
-func ContextEnrichmentMiddleware() fiber.Handler {
+func RecoverMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		// Skip Sentry enrichment if disabled to avoid allocations
-		if !config.IsSentryEnabled() {
-			return c.Next()
-		}
-
-		hub := sentryfiber.GetHubFromContext(c)
-		if hub == nil {
-			return c.Next()
-		}
-
-		// Set basic HTTP tags
-		hub.Scope().SetTag("http.method", c.Method())
-		hub.Scope().SetTag("http.route", c.Route().Path)
-		hub.Scope().SetTag("http.host", c.Hostname())
-
-		// Set request context
-		hub.Scope().SetContext("request", map[string]any{
-			"url":          c.OriginalURL(),
-			"method":       c.Method(),
-			"path":         c.Path(),
-			"route":        c.Route().Path,
-			"ip":           c.IP(),
-			"user_agent":   c.Get("User-Agent"),
-			"content_type": c.Get("Content-Type"),
-			"protocol":     c.Protocol(),
-			"hostname":     c.Hostname(),
-		})
-
-		// Add query params if present (avoid intermediate map allocation)
-		queries := c.Queries()
-		if len(queries) > 0 {
-			queryParams := make(map[string]any, len(queries))
-			for k, v := range queries {
-				queryParams[k] = v
-			}
-			hub.Scope().SetContext("query_params", queryParams)
-		}
-
-		// Add route params if present (avoid intermediate map allocation)
-		params := c.AllParams()
-		if len(params) > 0 {
-			routeParams := make(map[string]any, len(params))
-			for k, v := range params {
-				routeParams[k] = v
-			}
-			hub.Scope().SetContext("route_params", routeParams)
-		}
-
-		// Add user info if available
-		if user := c.Locals("user"); user != nil {
-			if userProvider, ok := user.(userIDProvider); ok {
-				if userID := userProvider.GetUserID(); userID != "" {
-					hub.Scope().SetUser(sentry.User{ID: userID})
-					hub.Scope().SetTag("user.id", userID)
+		defer func() {
+			if r := recover(); r != nil {
+				// Use middleware logger if configured, otherwise fall back to internal logger
+				log := config.GetMiddlewareLogger()
+				if log == nil {
+					log = handler.GetInternalLogger()
 				}
+
+				log.Error("Panic recovered",
+					slog.String("panic", fmt.Sprintf("%v", r)),
+					slog.String("url", c.OriginalURL()),
+					slog.String("method", c.Method()),
+				)
+
+				c.Status(fiber.StatusInternalServerError).JSON(lgerr.ErrorResponse{
+					Title:  "Internal Server Error",
+					Detail: "An unexpected error occurred",
+				})
 			}
-		}
+		}()
 
 		return c.Next()
-	}
-}
-
-// PerformanceMiddleware creates Sentry performance transactions for requests
-func PerformanceMiddleware() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		// Skip performance tracking if Sentry disabled
-		if !config.IsSentryEnabled() {
-			return c.Next()
-		}
-
-		hub := sentryfiber.GetHubFromContext(c)
-		if hub == nil {
-			return c.Next()
-		}
-
-		transactionName := fmt.Sprintf("%s %s", c.Method(), c.Route().Path)
-		ctx := c.UserContext()
-
-		transaction := sentry.StartTransaction(
-			ctx,
-			transactionName,
-			sentry.WithOpName("http.server"),
-			sentry.WithTransactionSource(sentry.SourceRoute),
-		)
-		defer transaction.Finish()
-
-		// Set transaction context
-		hub.Scope().SetContext("trace", map[string]any{
-			"trace_id": transaction.TraceID.String(),
-			"span_id":  transaction.SpanID.String(),
-		})
-
-		transaction.SetData("http.method", c.Method())
-		transaction.SetData("http.route", c.Route().Path)
-		transaction.SetData("http.url", c.OriginalURL())
-
-		ctx = transaction.Context()
-		c.SetUserContext(ctx)
-
-		err := c.Next()
-
-		// Set transaction status based on HTTP status
-		statusCode := c.Response().StatusCode()
-		transaction.SetData("http.status_code", statusCode)
-
-		if statusCode >= 500 {
-			transaction.Status = sentry.SpanStatusInternalError
-		} else if statusCode >= 400 {
-			transaction.Status = sentry.SpanStatusInvalidArgument
-		} else if statusCode >= 200 && statusCode < 300 {
-			transaction.Status = sentry.SpanStatusOK
-		}
-
-		return err
 	}
 }
 
@@ -240,74 +142,4 @@ func SetContext(c *fiber.Ctx, key string, value map[string]any) {
 		return
 	}
 	hub.Scope().SetContext(key, value)
-}
-
-// RecoverMiddleware recovers from panics and prevents application crashes
-// Captures panic details and sends them to Sentry (if enabled)
-//
-// CRITICAL: This middleware MUST be placed AFTER sentryfiber.New() but BEFORE other middleware
-//
-// Correct order:
-//
-//	app.Use(sentryfiber.New(...))        // 1. FIRST - Initialize Sentry hub
-//	app.Use(lgfiber.RecoverMiddleware()) // 2. SECOND - Catch panics
-//	app.Use(otherMiddleware...)          // 3. Other middleware
-//
-// Without sentryfiber.New() first, panics won't be sent to Sentry
-func RecoverMiddleware() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		defer func() {
-			if r := recover(); r != nil {
-				hub := sentryfiber.GetHubFromContext(c)
-
-				info := recoverPanic(c.UserContext(), r, hub, func(scope *sentry.Scope, info *panicInfo) {
-					scope.SetLevel(sentry.LevelFatal)
-					scope.SetTag("error_source", "panic_recovery")
-					scope.SetTag("handled", "false")
-
-					scope.SetContext("request", map[string]any{
-						"url":        c.OriginalURL(),
-						"method":     c.Method(),
-						"path":       c.Path(),
-						"route":      c.Route().Path,
-						"ip":         c.IP(),
-						"user_agent": c.Get("User-Agent"),
-					})
-
-					scope.SetFingerprint([]string{
-						"panic",
-						fmt.Sprintf("%v", r),
-						info.errorLoc,
-					})
-
-					hub.AddBreadcrumb(&sentry.Breadcrumb{
-						Type:     "error",
-						Category: "panic",
-						Message:  fmt.Sprintf("Panic recovered: %v", r),
-						Level:    sentry.LevelFatal,
-						Data: map[string]any{
-							"recovered_value": fmt.Sprintf("%v", r),
-							"location":        info.errorLoc,
-						},
-					}, nil)
-				})
-
-				log := handler.GetInternalLogger()
-				logFields := append([]any{
-					slog.String("url", c.OriginalURL()),
-					slog.String("method", c.Method()),
-					slog.String("route", c.Route().Path),
-				}, info.logFields()...)
-
-				log.ErrorContext(c.UserContext(), "Panic recovered in HTTP handler", logFields...)
-
-				_ = c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-					"title":  "Internal Server Error",
-					"detail": "An unexpected error occurred",
-				})
-			}
-		}()
-
-		return c.Next()
-	}
 }

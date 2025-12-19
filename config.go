@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/aeternitas-infinita/logbundle-go/pkg/config"
-	"github.com/aeternitas-infinita/logbundle-go/pkg/core"
 	"github.com/aeternitas-infinita/logbundle-go/pkg/handler"
 )
 
@@ -16,17 +15,28 @@ type LoggerConfig struct {
 }
 
 // CreateLogger creates a new logger instance with the provided configuration
-func CreateLogger(loggerConfig LoggerConfig) *slog.Logger {
+// If setAsMiddlewareLogger is true, this logger will be used by all middlewares
+func CreateLogger(loggerConfig LoggerConfig, setAsMiddlewareLogger ...bool) *slog.Logger {
 	h := handler.NewCustomHandler(os.Stdout, loggerConfig.Level, loggerConfig.AddSource)
-	return slog.New(h)
+	logger := slog.New(h)
+
+	// If setAsMiddlewareLogger is true, set this logger for middleware use
+	if len(setAsMiddlewareLogger) > 0 && setAsMiddlewareLogger[0] {
+		config.SetMiddlewareLogger(logger)
+	}
+
+	return logger
 }
 
-// CreateLoggerDefault creates a logger with default configuration from environment
-func CreateLoggerDefault() *slog.Logger {
-	return CreateLogger(LoggerConfig{
-		Level:     core.GetLvlFromEnv("log_level"),
-		AddSource: true,
-	})
+// SetMiddlewareLogger sets the logger to be used by all middlewares
+// If not set, middlewares will use the internal logger
+func SetMiddlewareLogger(logger *slog.Logger) {
+	config.SetMiddlewareLogger(logger)
+}
+
+// GetMiddlewareLogger returns the configured middleware logger, or nil if not set
+func GetMiddlewareLogger() *slog.Logger {
+	return config.GetMiddlewareLogger()
 }
 
 // IsSentryEnabled returns whether Sentry integration is currently enabled

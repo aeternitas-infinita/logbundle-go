@@ -6,69 +6,58 @@ import (
 	"sync"
 )
 
-// ErrorType represents the category of an error
 type ErrorType string
 
 const (
-	TypeInternal   ErrorType = "internal"     // Internal server errors (500)
-	TypeNotFound   ErrorType = "not_found"    // Resource not found (404)
-	TypeValidation ErrorType = "validation"   // Validation failures (400)
-	TypeDatabase   ErrorType = "database"     // Database errors (500)
-	TypeBusy       ErrorType = "busy"         // Service busy/unavailable (503)
-	TypeForbidden  ErrorType = "forbidden"    // Access forbidden (403)
-	TypeBadInput   ErrorType = "bad_input"    // Bad request input (400)
-	TypeUnauth     ErrorType = "unauthorized" // Unauthorized access (401)
-	TypeConflict   ErrorType = "conflict"     // Resource conflict (409)
-	TypeExternal   ErrorType = "external"     // External service error (502)
-	TypeTimeout    ErrorType = "timeout"      // Request timeout (504)
+	TypeInternal   ErrorType = "internal"
+	TypeNotFound   ErrorType = "not_found"
+	TypeValidation ErrorType = "validation"
+	TypeDatabase   ErrorType = "database"
+	TypeBusy       ErrorType = "busy"
+	TypeForbidden  ErrorType = "forbidden"
+	TypeBadInput   ErrorType = "bad_input"
+	TypeUnauth     ErrorType = "unauthorized"
+	TypeConflict   ErrorType = "conflict"
+	TypeExternal   ErrorType = "external"
+	TypeTimeout    ErrorType = "timeout"
 )
 
-// ValidationError represents a single field validation error
-// Following RFC 7807 problem details standard
 type ValidationError struct {
-	Field   string `json:"field"`           // Field name that failed validation
-	Message string `json:"message"`         // Human-readable error message
-	Value   any    `json:"value,omitempty"` // The value that failed validation
+	Field   string `json:"field"`
+	Message string `json:"message"`
+	Value   any    `json:"value,omitempty"`
 }
 
-// ErrorResponse represents the standard error response format
-// Following RFC 7807 Problem Details for HTTP APIs
 type ErrorResponse struct {
-	Title  string                 `json:"title"`            // Human-readable summary of the error
-	Detail string                 `json:"detail,omitempty"` // Human-readable explanation specific to this occurrence
-	Errors []ValidationError      `json:"errors,omitempty"` // Validation errors for fields
-	Meta   map[string]interface{} `json:"meta,omitempty"`   // Additional context/metadata
+	Title  string            `json:"title"`
+	Detail string            `json:"detail,omitempty"`
+	Errors []ValidationError `json:"errors,omitempty"`
+	Meta   map[string]any    `json:"meta,omitempty"`
 }
 
-// Response is a generic response wrapper for successful API responses
 type Response[T any] struct {
-	Data T `json:"data,omitempty"` // The response payload
+	Data T `json:"data,omitempty"`
 }
 
-// Error represents a rich error with type, context, stack trace, and HTTP mapping
-// Thread-safe for reading after creation. Use builder methods for initialization.
 type Error struct {
-	message          string            // Internal error message for logging
-	title            string            // Public-facing title (RFC 7807)
-	detail           string            // Public-facing detail (RFC 7807)
-	errorType        ErrorType         // Category of error (affects HTTP status)
-	httpStatus       *int              // Optional override for HTTP status code
-	context          map[string]any    // Additional context metadata
-	file             string            // Source file where error was created
-	line             int               // Line number where error was created
-	stackTrace       []uintptr         // Runtime stack trace
-	wrapped          error             // Wrapped underlying error
-	ignoreSentry     bool              // Flag to skip Sentry reporting
-	validationErrors []ValidationError // Field-level validation errors
+	message          string
+	title            string
+	detail           string
+	errorType        ErrorType
+	httpStatus       *int
+	context          map[string]any
+	file             string
+	line             int
+	stackTrace       []uintptr
+	wrapped          error
+	ignoreSentry     bool
+	validationErrors []ValidationError
 }
 
 var (
-	// httpStatusMap provides default HTTP status codes for each error type
-	httpStatusMap map[ErrorType]int
-	// customTypeMapping stores user-defined overrides for HTTP status codes
+	httpStatusMap     map[ErrorType]int
 	customTypeMapping map[ErrorType]int
-	// mapMutex protects concurrent access to HTTP status mappings
-	mapMutex sync.RWMutex
+	mapMutex          sync.RWMutex
 )
 
 func init() {
@@ -87,13 +76,6 @@ func init() {
 	}
 }
 
-// RegisterErrorType registers a custom error type with its HTTP status code
-// This allows you to define your own error types beyond the built-in ones
-//
-// Example:
-//
-//	const TypeRateLimited ErrorType = "rate_limited"
-//	lgerr.RegisterErrorType(TypeRateLimited, 429)
 func RegisterErrorType(errType ErrorType, httpStatus int) {
 	mapMutex.Lock()
 	defer mapMutex.Unlock()
@@ -105,15 +87,6 @@ func RegisterErrorType(errType ErrorType, httpStatus int) {
 	customTypeMapping[errType] = httpStatus
 }
 
-// SetHTTPStatusMap overrides HTTP status codes for existing or custom error types
-// Use this to customize the HTTP status mapping for your application
-//
-// Example:
-//
-//	lgerr.SetHTTPStatusMap(map[lgerr.ErrorType]int{
-//	    lgerr.TypeNotFound: 410,  // Use 410 Gone instead of 404
-//	    lgerr.TypeBusy:     429,  // Use 429 Too Many Requests instead of 503
-//	})
 func SetHTTPStatusMap(customMap map[ErrorType]int) {
 	mapMutex.Lock()
 	defer mapMutex.Unlock()
@@ -127,7 +100,6 @@ func SetHTTPStatusMap(customMap map[ErrorType]int) {
 	}
 }
 
-// ResetHTTPStatusMap resets all custom HTTP status mappings to defaults
 func ResetHTTPStatusMap() {
 	mapMutex.Lock()
 	defer mapMutex.Unlock()
@@ -135,8 +107,6 @@ func ResetHTTPStatusMap() {
 	customTypeMapping = make(map[ErrorType]int)
 }
 
-// GetHTTPStatus returns the HTTP status code for a given error type
-// Useful for testing or checking current mappings
 func GetHTTPStatus(errType ErrorType) int {
 	return getHTTPStatus(errType)
 }
@@ -145,30 +115,19 @@ func getHTTPStatus(errType ErrorType) int {
 	mapMutex.RLock()
 	defer mapMutex.RUnlock()
 
-	// Check custom mapping first
 	if customTypeMapping != nil {
 		if status, ok := customTypeMapping[errType]; ok {
 			return status
 		}
 	}
 
-	// Then check default mapping
 	if status, ok := httpStatusMap[errType]; ok {
 		return status
 	}
 
-	// Default to 500 for unknown types
 	return 500
 }
 
-// New creates a new Error with the given message and captures the stack trace
-// Default error type is TypeInternal (500). Use WithType() to change it.
-//
-// Example:
-//
-//	err := lgerr.New("database connection failed").
-//	    WithType(lgerr.TypeDatabase).
-//	    WithContext("host", "localhost")
 func New(message string) *Error {
 	const maxStackDepth = 32
 	var pcs [maxStackDepth]uintptr
@@ -190,19 +149,15 @@ func New(message string) *Error {
 		errorType:  TypeInternal,
 		file:       file,
 		line:       line,
-		stackTrace: pcs[:n:n], // Use slice expression to prevent unwanted mutations
-		context:    nil,        // Lazy-initialized on first use
+		stackTrace: pcs[:n:n],
 	}
 }
 
-// WithType sets the error type, which determines the default HTTP status code
 func (e *Error) WithType(errType ErrorType) *Error {
 	e.errorType = errType
 	return e
 }
 
-// WithContext adds a key-value pair to the error's context metadata
-// This metadata is included in logs and can be sent to Sentry
 func (e *Error) WithContext(key string, value any) *Error {
 	if e.context == nil {
 		e.context = make(map[string]any)
@@ -211,51 +166,39 @@ func (e *Error) WithContext(key string, value any) *Error {
 	return e
 }
 
-// WithHTTPStatus overrides the default HTTP status code for this specific error
 func (e *Error) WithHTTPStatus(status int) *Error {
 	e.httpStatus = &status
 	return e
 }
 
-// Wrap wraps another error into this error
 func (e *Error) Wrap(err error) *Error {
 	e.wrapped = err
 	return e
 }
 
-// SetHTTPStatus is a non-chainable alternative to WithHTTPStatus
 func (e *Error) SetHTTPStatus(status int) {
 	e.httpStatus = &status
 }
 
-// IgnoreSentry marks this error to be excluded from Sentry reporting
-// Useful for expected errors or those containing sensitive information
 func (e *Error) IgnoreSentry() *Error {
 	e.ignoreSentry = true
 	return e
 }
 
-// ShouldIgnoreSentry returns whether this error should skip Sentry reporting
 func (e *Error) ShouldIgnoreSentry() bool {
 	return e.ignoreSentry
 }
 
-// WithTitle sets the public-facing title (RFC 7807)
-// Title is a short, human-readable summary of the problem type
 func (e *Error) WithTitle(title string) *Error {
 	e.title = title
 	return e
 }
 
-// WithDetail sets the public-facing detail (RFC 7807)
-// Detail is a human-readable explanation specific to this occurrence
 func (e *Error) WithDetail(detail string) *Error {
 	e.detail = detail
 	return e
 }
 
-
-// WithValidationError adds a single validation error to the error
 func (e *Error) WithValidationError(field string, message string, value ...any) *Error {
 	if e.validationErrors == nil {
 		e.validationErrors = make([]ValidationError, 0)
@@ -318,27 +261,22 @@ func (e *Error) Wrapped() error {
 	return e.wrapped
 }
 
-// Title returns the public-facing title
 func (e *Error) Title() string {
 	return e.title
 }
 
-// Detail returns the public-facing detail
 func (e *Error) Detail() string {
 	return e.detail
 }
-
 
 func (e *Error) ValidationErrors() []ValidationError {
 	return e.validationErrors
 }
 
-// HasValidationErrors returns true if there are validation errors
 func (e *Error) HasValidationErrors() bool {
 	return len(e.validationErrors) > 0
 }
 
-// ToErrorResponse converts the error to an ErrorResponse (RFC 7807 format)
 func (e *Error) ToErrorResponse() ErrorResponse {
 	response := ErrorResponse{
 		Title:  e.title,
@@ -346,7 +284,6 @@ func (e *Error) ToErrorResponse() ErrorResponse {
 		Errors: e.validationErrors,
 	}
 
-	// Add context as meta if present
 	if len(e.context) > 0 {
 		response.Meta = e.context
 	}
