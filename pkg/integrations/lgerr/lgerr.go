@@ -3,6 +3,7 @@ package lgerr
 import (
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 )
 
@@ -201,7 +202,7 @@ func (e *Error) WithDetail(detail string) *Error {
 
 func (e *Error) WithValidationError(field string, message string, value ...any) *Error {
 	if e.validationErrors == nil {
-		e.validationErrors = make([]ValidationError, 0)
+		e.validationErrors = make([]ValidationError, 0, 4) // Pre-allocate for typical validation error count
 	}
 	validationErr := ValidationError{
 		Field:   field,
@@ -304,14 +305,17 @@ func (e *Error) FormatStackTrace() string {
 		return "no stack trace available"
 	}
 
-	var result string
+	var builder strings.Builder
+	// Pre-allocate approximate size: ~100 chars per frame
+	builder.Grow(len(e.stackTrace) * 100)
+
 	frames := runtime.CallersFrames(e.stackTrace)
 	for {
 		frame, more := frames.Next()
-		result += fmt.Sprintf("%s:%d %s\n", frame.File, frame.Line, frame.Function)
+		fmt.Fprintf(&builder, "%s:%d %s\n", frame.File, frame.Line, frame.Function)
 		if !more {
 			break
 		}
 	}
-	return result
+	return builder.String()
 }

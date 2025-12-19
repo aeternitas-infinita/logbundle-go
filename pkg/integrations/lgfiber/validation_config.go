@@ -33,8 +33,9 @@ var (
 	defaultGlobalLogger  *slog.Logger
 	configMutex          sync.RWMutex
 
-	fieldNameCache      = make(map[reflect.Type]map[string]string)
+	fieldNameCache      = make(map[reflect.Type]map[string]string, 64) // Pre-allocate with reasonable capacity
 	fieldNameCacheMutex sync.RWMutex
+	cacheMaxSize        = 1000 // Maximum cache entries to prevent unbounded growth
 )
 
 // getDefaultValidator returns the default validator instance (lazy initialization)

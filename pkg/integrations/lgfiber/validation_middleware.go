@@ -96,13 +96,24 @@ func genericValidationMiddleware[T any](
 //	    // Use validated body...
 //	}
 func BodyValidationMiddleware[T any]() fiber.Handler {
-	// Capture global config once at middleware creation (not per-request)
+	// Capture global config pointers once at middleware creation (avoid struct copy)
 	configMutex.RLock()
-	config := defaultBodyConfig
-	if defaultGlobalLogger != nil && config.Logger == nil {
-		config.Logger = defaultGlobalLogger
+	logger := defaultBodyConfig.Logger
+	validator := defaultBodyConfig.Validator
+	title := defaultBodyConfig.Title
+	detail := defaultBodyConfig.Detail
+	if defaultGlobalLogger != nil && logger == nil {
+		logger = defaultGlobalLogger
 	}
 	configMutex.RUnlock()
+
+	config := ValidationConfig{
+		Logger:    logger,
+		Validator: validator,
+		LocalsKey: "body",
+		Title:     title,
+		Detail:    detail,
+	}
 
 	return genericValidationMiddleware(
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.BodyParser(dto) },
@@ -134,13 +145,24 @@ func BodyValidationMiddleware[T any]() fiber.Handler {
 //	    // Use validated query...
 //	}
 func QueryValidationMiddleware[T any]() fiber.Handler {
-	// Capture global config once at middleware creation (not per-request)
+	// Capture global config pointers once at middleware creation (avoid struct copy)
 	configMutex.RLock()
-	config := defaultQueryConfig
-	if defaultGlobalLogger != nil && config.Logger == nil {
-		config.Logger = defaultGlobalLogger
+	logger := defaultQueryConfig.Logger
+	validator := defaultQueryConfig.Validator
+	title := defaultQueryConfig.Title
+	detail := defaultQueryConfig.Detail
+	if defaultGlobalLogger != nil && logger == nil {
+		logger = defaultGlobalLogger
 	}
 	configMutex.RUnlock()
+
+	config := ValidationConfig{
+		Logger:    logger,
+		Validator: validator,
+		LocalsKey: "query",
+		Title:     title,
+		Detail:    detail,
+	}
 
 	return genericValidationMiddleware(
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.QueryParser(dto) },
@@ -171,13 +193,24 @@ func QueryValidationMiddleware[T any]() fiber.Handler {
 //	    // Use validated params...
 //	}
 func ParamsValidationMiddleware[T any]() fiber.Handler {
-	// Capture global config once at middleware creation (not per-request)
+	// Capture global config pointers once at middleware creation (avoid struct copy)
 	configMutex.RLock()
-	config := defaultParamsConfig
-	if defaultGlobalLogger != nil && config.Logger == nil {
-		config.Logger = defaultGlobalLogger
+	logger := defaultParamsConfig.Logger
+	validator := defaultParamsConfig.Validator
+	title := defaultParamsConfig.Title
+	detail := defaultParamsConfig.Detail
+	if defaultGlobalLogger != nil && logger == nil {
+		logger = defaultGlobalLogger
 	}
 	configMutex.RUnlock()
+
+	config := ValidationConfig{
+		Logger:    logger,
+		Validator: validator,
+		LocalsKey: "params",
+		Title:     title,
+		Detail:    detail,
+	}
 
 	return genericValidationMiddleware(
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.ParamsParser(dto) },
@@ -209,13 +242,24 @@ func ParamsValidationMiddleware[T any]() fiber.Handler {
 //	    // Use validated headers...
 //	}
 func HeadersValidationMiddleware[T any]() fiber.Handler {
-	// Capture global config once at middleware creation (not per-request)
+	// Capture global config pointers once at middleware creation (avoid struct copy)
 	configMutex.RLock()
-	config := defaultHeadersConfig
-	if defaultGlobalLogger != nil && config.Logger == nil {
-		config.Logger = defaultGlobalLogger
+	logger := defaultHeadersConfig.Logger
+	validator := defaultHeadersConfig.Validator
+	title := defaultHeadersConfig.Title
+	detail := defaultHeadersConfig.Detail
+	if defaultGlobalLogger != nil && logger == nil {
+		logger = defaultGlobalLogger
 	}
 	configMutex.RUnlock()
+
+	config := ValidationConfig{
+		Logger:    logger,
+		Validator: validator,
+		LocalsKey: "headers",
+		Title:     title,
+		Detail:    detail,
+	}
 
 	return genericValidationMiddleware(
 		func(ctx *fiber.Ctx, dto *T) error { return ctx.ReqHeaderParser(dto) },
@@ -256,19 +300,24 @@ func FormDataValidationMiddleware[T any](formFieldName string) fiber.Handler {
 		fieldName = formFieldName
 	}
 
-	// Capture global config once at middleware creation (not per-request)
+	// Capture global config pointers once at middleware creation (avoid struct copy)
 	configMutex.RLock()
-	config := ValidationConfig{
-		Logger:    defaultBodyConfig.Logger,
-		Validator: defaultBodyConfig.Validator,
-		Title:     defaultBodyConfig.Title,
-		Detail:    defaultBodyConfig.Detail,
-		LocalsKey: "form_data",
-	}
-	if defaultGlobalLogger != nil && config.Logger == nil {
-		config.Logger = defaultGlobalLogger
+	logger := defaultBodyConfig.Logger
+	validator := defaultBodyConfig.Validator
+	title := defaultBodyConfig.Title
+	detail := defaultBodyConfig.Detail
+	if defaultGlobalLogger != nil && logger == nil {
+		logger = defaultGlobalLogger
 	}
 	configMutex.RUnlock()
+
+	config := ValidationConfig{
+		Logger:    logger,
+		Validator: validator,
+		LocalsKey: "form_data",
+		Title:     title,
+		Detail:    detail,
+	}
 
 	return genericValidationMiddleware(
 		func(ctx *fiber.Ctx, dto *T) error {

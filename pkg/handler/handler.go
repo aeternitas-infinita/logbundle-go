@@ -78,8 +78,8 @@ func (h *CustomHandler) Handle(ctx context.Context, r slog.Record) error {
 		parts = append(parts, timestamp, level, r.Message)
 	}
 
-	// Collect attributes in a single iteration (dynamic allocation)
-	var attrs []string
+	// Collect attributes in a single iteration
+	attrs := make([]string, 0, 8) // Pre-allocate for typical attribute count
 	r.Attrs(func(a slog.Attr) bool {
 		if a.Key == "source" {
 			return true // Skip source attribute as it's already handled

@@ -129,7 +129,7 @@ func buildStacktrace(pcs []uintptr) *sentry.Stacktrace {
 	}
 
 	frames := runtime.CallersFrames(pcs)
-	var sentryFrames []sentry.Frame
+	sentryFrames := make([]sentry.Frame, 0, len(pcs)) // Pre-allocate with exact capacity
 
 	for {
 		frame, more := frames.Next()
@@ -144,7 +144,7 @@ func buildStacktrace(pcs []uintptr) *sentry.Stacktrace {
 		}
 	}
 
-	// Reverse frames (Sentry expects bottom-up)
+	// Reverse frames in-place (Sentry expects bottom-up)
 	for i, j := 0, len(sentryFrames)-1; i < j; i, j = i+1, j-1 {
 		sentryFrames[i], sentryFrames[j] = sentryFrames[j], sentryFrames[i]
 	}

@@ -70,10 +70,13 @@ func getJSONFieldName(dto any, fieldName string) string {
 	jsonName := parts[0]
 
 	fieldNameCacheMutex.Lock()
-	if fieldNameCache[t] == nil {
-		fieldNameCache[t] = make(map[string]string)
+	// Prevent unbounded cache growth - only cache if under limit
+	if len(fieldNameCache) < cacheMaxSize {
+		if fieldNameCache[t] == nil {
+			fieldNameCache[t] = make(map[string]string)
+		}
+		fieldNameCache[t][fieldName] = jsonName
 	}
-	fieldNameCache[t][fieldName] = jsonName
 	fieldNameCacheMutex.Unlock()
 
 	return jsonName
